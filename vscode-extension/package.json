@@ -4,6 +4,7 @@
     "description": "Route VS Code Copilot command approvals to your phone via Telegram, Slack, or other channels",
     "version": "0.5.0",
     "publisher": "technologica",
+    "icon": "icon.png",
     "repository": {
         "type": "git",
         "url": "https://github.com/sandeep-patel/gatekeeper"
