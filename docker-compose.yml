@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  telegram-approval:
+    build: .
+    container_name: telegram-approval-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - APPROVAL_HTTP_PORT=8765
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./config.json:/app/config.json:ro

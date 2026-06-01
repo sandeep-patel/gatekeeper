@@ -1,0 +1,29 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Config with secrets
+config.json
+.env
+*.env
+
+# VS Code Extension
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
