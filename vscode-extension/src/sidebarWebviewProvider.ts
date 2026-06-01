@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'telegramApproval.mainView';
+    public static readonly viewType = 'gatekeeper.mainView';
     private _view?: vscode.WebviewView;
     private _context: vscode.ExtensionContext;
     
@@ -30,22 +30,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
                 case 'openSetup':
-                    vscode.commands.executeCommand('telegramApproval.setup');
+                    vscode.commands.executeCommand('gatekeeper.setup');
                     break;
                 case 'startBot':
-                    vscode.commands.executeCommand('telegramApproval.startBot');
+                    vscode.commands.executeCommand('gatekeeper.startBot');
                     break;
                 case 'testConnection':
-                    vscode.commands.executeCommand('telegramApproval.testConnection');
+                    vscode.commands.executeCommand('gatekeeper.testConnection');
                     break;
                 case 'showLogs':
-                    vscode.commands.executeCommand('telegramApproval.showLogs');
+                    vscode.commands.executeCommand('gatekeeper.showLogs');
                     break;
                 case 'runWithApproval':
-                    vscode.commands.executeCommand('telegramApproval.runWithApproval');
+                    vscode.commands.executeCommand('gatekeeper.runWithApproval');
                     break;
                 case 'managePatterns':
-                    vscode.commands.executeCommand('telegramApproval.managePatterns');
+                    vscode.commands.executeCommand('gatekeeper.managePatterns');
                     break;
                 case 'getStatus':
                     this._sendStatus();
@@ -83,7 +83,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Approval</title>
+    <title>GateKeeper</title>
     <style>
         body {
             font-family: var(--vscode-font-family);

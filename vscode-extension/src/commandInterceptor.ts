@@ -66,10 +66,10 @@ export class CommandInterceptor {
         }
     ): vscode.Task {
         const task = new vscode.Task(
-            { type: 'telegram-approved', command },
+            { type: 'gatekeeper-approved', command },
             vscode.TaskScope.Workspace,
             name,
-            'telegram-approval',
+            'gatekeeper',
             new vscode.CustomExecution(async () => {
                 // Request approval
                 const approved = await this.approvalClient.requestApproval(command, {

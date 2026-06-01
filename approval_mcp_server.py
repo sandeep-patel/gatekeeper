@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-MCP Server for Telegram Command Approval
+MCP Server for GateKeeper - Remote Command Approval
 
 This MCP server provides a tool that routes command execution through
-Telegram for approval before running.
+remote approval (currently Telegram) before running.
 
 Add to your VS Code settings.json:
 {
     "mcp.servers": {
-        "telegram-approval": {
+        "gatekeeper": {
             "type": "stdio",
             "command": "python",
             "args": ["/path/to/approval_mcp_server.py"]
@@ -31,10 +31,10 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # Configuration
-APPROVAL_SERVER_URL = os.environ.get("TELEGRAM_APPROVAL_URL", "http://localhost:8765")
-DEFAULT_TIMEOUT = int(os.environ.get("TELEGRAM_APPROVAL_TIMEOUT", "300"))
+APPROVAL_SERVER_URL = os.environ.get("GATEKEEPER_URL", "http://localhost:8765")
+DEFAULT_TIMEOUT = int(os.environ.get("GATEKEEPER_TIMEOUT", "300"))
 
-server = Server("telegram-command-approval")
+server = Server("gatekeeper")
 
 
 async def request_approval(
@@ -43,7 +43,7 @@ async def request_approval(
     goal: str = "",
     timeout: int = DEFAULT_TIMEOUT,
 ) -> bool:
-    """Request approval from Telegram bot."""
+    """Request approval from GateKeeper server."""
     request_id = f"{datetime.now().timestamp()}-{os.getpid()}"
     
     try:
@@ -110,10 +110,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="run_approved_command",
             description=(
-                "Run a shell command after getting approval via Telegram. "
+                "Run a shell command after getting remote approval via GateKeeper. "
                 "Use this instead of regular terminal commands when you want "
                 "the user to approve from their phone. The command will be sent "
-                "to Telegram and will wait for the user to approve or reject."
+                "to the user and will wait for them to approve or reject."
             ),
             inputSchema={
                 "type": "object",
@@ -150,7 +150,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="check_approval_server",
-            description="Check if the Telegram approval server is running and healthy",
+            description="Check if the GateKeeper approval server is running and healthy",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -184,7 +184,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         except Exception as e:
             return [TextContent(
                 type="text",
-                text=f"❌ Cannot connect to approval server: {e}\n\nMake sure the bot is running:\n  cd telegram-approval && python bot.py",
+                text=f"❌ Cannot connect to approval server: {e}\n\nMake sure the server is running:\n  cd gatekeeper && python bot.py",
             )]
 
     elif name == "run_approved_command":

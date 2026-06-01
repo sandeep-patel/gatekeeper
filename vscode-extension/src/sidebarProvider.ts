@@ -36,14 +36,14 @@ export class StatusTreeProvider implements vscode.TreeDataProvider<StatusItem> {
                 'Server: Running',
                 this.isConnected ? '🟢 Connected' : '🟡 Starting...',
                 vscode.TreeItemCollapsibleState.None,
-                'telegramApproval.testConnection'
+                'gatekeeper.testConnection'
             ));
         } else {
             items.push(new StatusItem(
                 'Server: Stopped',
                 '⚪ Not running',
                 vscode.TreeItemCollapsibleState.None,
-                'telegramApproval.setup'
+                'gatekeeper.setup'
             ));
         }
 
@@ -79,32 +79,32 @@ export class ActionsTreeProvider implements vscode.TreeDataProvider<ActionItem> 
             new ActionItem(
                 '$(gear) Setup / Configure',
                 'Open setup panel',
-                'telegramApproval.setup'
+                'gatekeeper.setup'
             ),
             new ActionItem(
                 '$(play) Start Server',
-                'Start the approval bot',
-                'telegramApproval.startBot'
+                'Start the approval server',
+                'gatekeeper.startBot'
             ),
             new ActionItem(
                 '$(terminal) Run with Approval',
                 'Run a command with approval',
-                'telegramApproval.runWithApproval'
+                'gatekeeper.runWithApproval'
             ),
             new ActionItem(
                 '$(checklist) Manage Patterns',
                 'Auto-approve patterns',
-                'telegramApproval.managePatterns'
+                'gatekeeper.managePatterns'
             ),
             new ActionItem(
                 '$(plug) Test Connection',
                 'Test server connection',
-                'telegramApproval.testConnection'
+                'gatekeeper.testConnection'
             ),
             new ActionItem(
                 '$(output) Show Logs',
                 'View debug logs',
-                'telegramApproval.showLogs'
+                'gatekeeper.showLogs'
             ),
         ];
     }

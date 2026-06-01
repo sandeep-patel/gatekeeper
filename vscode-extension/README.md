@@ -1,11 +1,25 @@
-# Telegram Command Approval
+# GateKeeper - Remote Command Approval
 
-Approve VS Code Copilot terminal commands from your phone via Telegram! 📱✅
+Approve VS Code Copilot terminal commands from your phone! 📱✅
+
+## Supported Channels
+
+| Channel | Status |
+|---------|--------|
+| 📱 **Telegram** | ✅ Available |
+| 💬 Slack | 🔜 Coming Soon |
+| 💚 WhatsApp | 🔜 Coming Soon |
+| 🎮 Discord | 🔜 Coming Soon |
+| 📧 Email | 🔜 Coming Soon |
+| 📲 SMS (Twilio) | 🔜 Coming Soon |
+| 🔔 Pushover | 🔜 Coming Soon |
+| 📨 Microsoft Teams | 🔜 Coming Soon |
+| 🔗 Webhook (Custom) | 🔜 Coming Soon |
 
 ## Features
 
 - **One-Click Setup**: Enter bot token and chat ID, click Start — that's it!
-- **Mobile Approval**: Approve or reject commands from anywhere via Telegram
+- **Mobile Approval**: Approve or reject commands from anywhere
 - **Real-time Notifications**: Get instant alerts when Copilot wants to run a command
 - **Quick Actions**: Approve all or reject all pending commands
 - **Timeout Protection**: Commands auto-reject after 5 minutes of no response
@@ -28,7 +42,7 @@ Approve VS Code Copilot terminal commands from your phone via Telegram! 📱✅
 
 ### 3. Configure the Extension
 
-1. Click the **TG Approval** status bar item (or run `Telegram Approval: Setup`)
+1. Click the **GateKeeper** sidebar icon (shield) or run `GateKeeper: Setup`
 2. Paste your bot token and chat ID
 3. Click **🚀 Start Approval Server**
 
@@ -38,14 +52,14 @@ Approve VS Code Copilot terminal commands from your phone via Telegram! 📱✅
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  VS Code        │────▶│  Built-in Bot    │────▶│  Telegram   │
-│  Copilot        │     │  Server          │     │  App        │
-│                 │◀────│                  │◀────│  (Phone)    │
+│  VS Code        │────▶│  GateKeeper      │────▶│  Your Phone │
+│  Copilot        │     │  Server          │     │  (Telegram) │
+│                 │◀────│                  │◀────│             │
 └─────────────────┘     └──────────────────┘     └─────────────┘
 ```
 
 1. Copilot wants to run a command
-2. Command is sent to your Telegram
+2. Command is sent to your phone
 3. You tap ✅ Approve or ❌ Reject
 4. VS Code continues or cancels
 
@@ -53,12 +67,12 @@ Approve VS Code Copilot terminal commands from your phone via Telegram! 📱✅
 
 | Command | Description |
 |---------|-------------|
-| `Telegram Approval: Setup` | **Main setup UI** - configure and start the server |
-| `Telegram Approval: Configure` | Quick settings menu |
-| `Telegram Approval: Test Connection` | Verify bot is running |
-| `Telegram Approval: Run Command with Approval` | Run a command with manual approval |
-| `Telegram Approval: Manage Auto-Approve Patterns` | Add/remove safe patterns |
-| `Telegram Approval: Show Logs` | Open debug output |
+| `GateKeeper: Setup` | **Main setup UI** - configure and start the server |
+| `GateKeeper: Configure` | Quick settings menu |
+| `GateKeeper: Test Connection` | Verify server is running |
+| `GateKeeper: Run Command with Approval` | Run a command with manual approval |
+| `GateKeeper: Manage Auto-Approve Patterns` | Add/remove safe patterns |
+| `GateKeeper: Show Logs` | Open debug output |
 
 ## Telegram Commands
 
@@ -73,11 +87,11 @@ Approve VS Code Copilot terminal commands from your phone via Telegram! 📱✅
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `telegramApproval.enabled` | Enable approval routing | `false` |
-| `telegramApproval.serverUrl` | Bot HTTP server URL | `http://localhost:8765` |
-| `telegramApproval.timeoutSeconds` | Approval timeout | `300` |
-| `telegramApproval.autoApprovePatterns` | Regex patterns to auto-approve | `[]` |
-| `telegramApproval.httpPort` | HTTP server port | `8765` |
+| `gatekeeper.enabled` | Enable approval routing | `false` |
+| `gatekeeper.serverUrl` | Server HTTP URL | `http://localhost:8765` |
+| `gatekeeper.timeoutSeconds` | Approval timeout | `300` |
+| `gatekeeper.autoApprovePatterns` | Regex patterns to auto-approve | `[]` |
+| `gatekeeper.httpPort` | HTTP server port | `8765` |
 
 ## Auto-Approve Patterns
 
@@ -85,11 +99,7 @@ Add regex patterns for commands that should auto-approve:
 
 ```json
 {
-    "telegramApproval.autoApprovePatterns": [
-        "^(ls|pwd|cat|echo)\\b",
-        "^git (status|log|diff)",
-        "^npm (list|outdated)"
-    ]
+    "gatekeeper.autoApprovePatterns": [
 }
 ```
 
@@ -109,7 +119,7 @@ For deeper Copilot integration, you can also use the MCP server. Add to your VS 
 {
     "mcp": {
         "servers": {
-            "telegram-approval": {
+            "gatekeeper": {
                 "type": "stdio",
                 "command": "/path/to/.venv/bin/python",
                 "args": ["/path/to/approval_mcp_server.py"]
@@ -130,26 +140,26 @@ This provides the `run_approved_command` tool for Copilot agent mode.
 
 ## Requirements
 
-- **Python 3.8+** with the telegram-approval bot package
-- Clone the repo: `git clone https://github.com/patelsan/telegram-approval`
-- Install deps: `cd telegram-approval && pip install -r requirements.txt`
+- **Python 3.8+** with the GateKeeper bot package
+- Clone the repo: `git clone https://github.com/patelsan/gatekeeper`
+- Install deps: `cd gatekeeper && pip install -r requirements.txt`
 
 ## Troubleshooting
 
 ### Server not starting?
-1. Check `Telegram Approval: Show Logs` for errors
+1. Check `GateKeeper: Show Logs` for errors
 2. Verify Python is installed: `python3 --version`
 3. Ensure bot dependencies are installed
 
-### Not receiving Telegram messages?
+### Not receiving messages?
 1. Verify your Chat ID is correct
 2. Make sure you started a chat with your bot
 3. Check the bot token is valid
 
 ## Links
 
-- [Full Documentation](https://github.com/patelsan/telegram-approval)
-- [Report Issues](https://github.com/patelsan/telegram-approval/issues)
+- [Full Documentation](https://github.com/patelsan/gatekeeper)
+- [Report Issues](https://github.com/patelsan/gatekeeper/issues)
 
 ## License
 

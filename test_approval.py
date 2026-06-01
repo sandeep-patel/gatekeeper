@@ -23,13 +23,13 @@ async def test_approval():
                     return
     except aiohttp.ClientError as e:
         print(f"❌ Cannot connect to server: {e}")
-        print("\nMake sure the bot is running:")
+        print("\nMake sure the GateKeeper server is running:")
         print("  python bot.py")
         return
 
     # Send test approval request
     print("\nSending test approval request...")
-    print("Check your Telegram for the approval prompt!")
+    print("Check your phone for the approval prompt!")
     
     try:
         async with aiohttp.ClientSession() as session:
@@ -38,7 +38,7 @@ async def test_approval():
                 json={
                     "command": "echo 'Hello from test!'",
                     "explanation": "Test command to verify the approval flow",
-                    "goal": "Verify Telegram approval is working",
+                    "goal": "Verify GateKeeper approval is working",
                 },
                 timeout=aiohttp.ClientTimeout(total=60),
             ) as resp:

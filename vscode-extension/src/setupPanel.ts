@@ -33,8 +33,8 @@ export class SetupPanel {
         }
 
         const panel = vscode.window.createWebviewPanel(
-            'telegramApprovalSetup',
-            'Telegram Approval Setup',
+            'gatekeeperSetup',
+            'GateKeeper Setup',
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -83,8 +83,8 @@ export class SetupPanel {
     }
 
     private async _sendStatus() {
-        const config = vscode.workspace.getConfiguration('telegramApproval');
-        const token = await this._context.secrets.get('telegramApproval.botToken') || '';
+        const config = vscode.workspace.getConfiguration('gatekeeper');
+        const token = await this._context.secrets.get('gatekeeper.botToken') || '';
         const chatId = config.get<string>('chatId') || '';
         const port = config.get<number>('httpPort') || 8765;
         
@@ -129,7 +129,7 @@ export class SetupPanel {
             // Get existing token if using existing
             let finalToken = token;
             if (useExistingToken || !token) {
-                const existingToken = await this._context.secrets.get('telegramApproval.botToken');
+                const existingToken = await this._context.secrets.get('gatekeeper.botToken');
                 if (existingToken) {
                     finalToken = existingToken;
                     log('Using existing saved token');
@@ -152,11 +152,11 @@ export class SetupPanel {
 
             // Save token securely (only if new token provided)
             if (token && token.includes(':')) {
-                await this._context.secrets.store('telegramApproval.botToken', token);
+                await this._context.secrets.store('gatekeeper.botToken', token);
             }
             
             // Save other settings
-            const config = vscode.workspace.getConfiguration('telegramApproval');
+            const config = vscode.workspace.getConfiguration('gatekeeper');
             await config.update('chatId', chatId, vscode.ConfigurationTarget.Global);
             await config.update('httpPort', port, vscode.ConfigurationTarget.Global);
             await config.update('serverUrl', `http://localhost:${port}`, vscode.ConfigurationTarget.Global);
@@ -182,7 +182,7 @@ export class SetupPanel {
         // Find the bot script
         const botScriptPath = await this._findBotScript();
         if (!botScriptPath) {
-            this._showError('Bot script not found. Please ensure the telegram-approval package is installed.');
+            this._showError('Bot script not found. Please ensure the GateKeeper package is installed.');
             return;
         }
 
@@ -233,7 +233,7 @@ export class SetupPanel {
 
         if (botProcess && !botProcess.killed) {
             this._panel.webview.postMessage({ command: 'started' });
-            vscode.window.showInformationMessage('✅ Telegram Approval Bot started successfully!');
+            vscode.window.showInformationMessage('✅ GateKeeper server started successfully!');
             log('Bot started successfully');
             
             // Auto-register MCP server
@@ -283,20 +283,20 @@ export class SetupPanel {
             }
             
             // Check if already configured with correct path
-            const existingServer = mcpConfig.servers?.['telegram-approval'];
+            const existingServer = mcpConfig.servers?.['gatekeeper'];
             if (existingServer?.args?.[0] === mcpServerPath) {
                 log('MCP server already registered with correct path');
                 return;
             }
             
-            // Add/update telegram-approval server using Node.js (no Python needed!)
+            // Add/update gatekeeper server using Node.js (no Python needed!)
             mcpConfig.servers = mcpConfig.servers || {};
-            mcpConfig.servers['telegram-approval'] = {
+            mcpConfig.servers['gatekeeper'] = {
                 type: 'stdio',
                 command: 'node',
                 args: [mcpServerPath],
                 env: {
-                    TELEGRAM_APPROVAL_URL: `http://localhost:${port}`
+                    GATEKEEPER_URL: `http://localhost:${port}`
                 }
             };
             
@@ -326,7 +326,7 @@ export class SetupPanel {
     }
 
     private async _stopBot() {
-        const config = vscode.workspace.getConfiguration('telegramApproval');
+        const config = vscode.workspace.getConfiguration('gatekeeper');
         const port = config.get<number>('httpPort') || 8765;
         
         // Kill our process if we started it
@@ -354,9 +354,9 @@ export class SetupPanel {
     }
 
     private async _testCommand(port: number) {
-        log(`Testing command approval via Telegram on port ${port}...`);
+        log(`Testing command approval on port ${port}...`);
         
-        // Notify UI we're waiting for Telegram
+        // Notify UI we're waiting for approval
         this._panel.webview.postMessage({
             command: 'testWaiting',
         });
@@ -368,7 +368,7 @@ export class SetupPanel {
                 requestId: `test-${Date.now()}`,
                 command: testCommand,
                 explanation: 'Test command from VS Code extension setup',
-                goal: 'Verify Telegram approval flow is working',
+                goal: 'Verify approval flow is working',
             });
             
             const result = await new Promise<{approved: boolean; error?: string}>((resolve) => {
@@ -444,9 +444,9 @@ export class SetupPanel {
             // Parent of extension (if installed from repo)
             path.join(this._extensionUri.fsPath, '..'),
             // User's home directory
-            path.join(process.env.HOME || '', 'telegram-approval'),
+            path.join(process.env.HOME || '', 'gatekeeper'),
             // Config setting
-            vscode.workspace.getConfiguration('telegramApproval').get<string>('botPath'),
+            vscode.workspace.getConfiguration('gatekeeper').get<string>('botPath'),
         ].filter(Boolean);
 
         for (const basePath of possiblePaths) {
@@ -508,7 +508,7 @@ export class SetupPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Approval Setup</title>
+    <title>GateKeeper Setup</title>
     <style>
         :root {
             --vscode-font-family: var(--vscode-editor-font-family, -apple-system, BlinkMacSystemFont, sans-serif);
@@ -680,7 +680,7 @@ export class SetupPanel {
     </style>
 </head>
 <body>
-    <h1>📱 Telegram Approval Setup</h1>
+    <h1>�️ GateKeeper Setup</h1>
     <p class="subtitle">Approve VS Code Copilot commands from your phone</p>
 
     <div id="status-card" class="status-card status-stopped">
@@ -695,7 +695,7 @@ export class SetupPanel {
     <div id="success-message" class="success-message"></div>
 
     <div class="steps">
-        <h3>Quick Setup (2 minutes)</h3>
+        <h3>📡 Telegram Channel Setup (2 minutes)</h3>
         <ol>
             <li>Open <button class="btn-link" onclick="openBotFather()">@BotFather</button> on Telegram</li>
             <li>Send <code>/newbot</code> and follow prompts</li>

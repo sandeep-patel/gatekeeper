@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP Server for Telegram Command Approval (TypeScript version)
+ * MCP Server for GateKeeper - Remote Command Approval (TypeScript version)
  * 
  * This is bundled with the VS Code extension and auto-registered.
  */
@@ -18,8 +18,8 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 // Configuration
-const APPROVAL_SERVER_URL = process.env.TELEGRAM_APPROVAL_URL || 'http://localhost:8765';
-const DEFAULT_TIMEOUT = parseInt(process.env.TELEGRAM_APPROVAL_TIMEOUT || '300', 10);
+const APPROVAL_SERVER_URL = process.env.GATEKEEPER_URL || 'http://localhost:8765';
+const DEFAULT_TIMEOUT = parseInt(process.env.GATEKEEPER_TIMEOUT || '300', 10);
 
 /**
  * Make an HTTP request (simple wrapper)
@@ -122,8 +122,8 @@ async function runCommand(
 // Create server
 const server = new Server(
     {
-        name: 'telegram-command-approval',
-        version: '0.3.0',
+        name: 'gatekeeper',
+        version: '0.5.0',
     },
     {
         capabilities: {
@@ -138,10 +138,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         {
             name: 'run_approved_command',
             description:
-                'Run a shell command after getting approval via Telegram. ' +
+                'Run a shell command after getting remote approval via GateKeeper. ' +
                 'Use this instead of regular terminal commands when you want ' +
                 'the user to approve from their phone. The command will be sent ' +
-                'to Telegram and will wait for the user to approve or reject.',
+                'to the user and will wait for them to approve or reject.',
             inputSchema: {
                 type: 'object',
                 properties: {

@@ -1,19 +1,33 @@
-# Telegram Command Approval for VS Code Copilot
+# GateKeeper - Remote Command Approval
 
-Approve VS Code Copilot terminal commands from your phone via Telegram! 📱✅
+Approve VS Code Copilot terminal commands from your phone! 📱✅
+
+## Supported Channels
+
+| Channel | Status |
+|---------|--------|
+| 📱 **Telegram** | ✅ Available |
+| 💬 Slack | 🔜 Coming Soon |
+| 💚 WhatsApp | 🔜 Coming Soon |
+| 🎮 Discord | 🔜 Coming Soon |
+| 📧 Email | 🔜 Coming Soon |
+| 📲 SMS (Twilio) | 🔜 Coming Soon |
+| 🔔 Pushover | 🔜 Coming Soon |
+| 📨 Microsoft Teams | 🔜 Coming Soon |
+| 🔗 Webhook (Custom) | 🔜 Coming Soon |
 
 ## How It Works
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  VS Code        │────▶│  Telegram Bot    │────▶│  Telegram   │
-│  Copilot        │     │  (Python)        │     │  App        │
-│                 │◀────│                  │◀────│  (Phone)    │
+│  VS Code        │────▶│  GateKeeper      │────▶│  Your Phone │
+│  Copilot        │     │  Server          │     │  (Telegram) │
+│                 │◀────│                  │◀────│             │
 └─────────────────┘     └──────────────────┘     └─────────────┘
 ```
 
 1. Copilot wants to run a command
-2. Command is sent to your Telegram
+2. Command is sent to your phone
 3. You tap ✅ Approve or ❌ Reject
 4. VS Code continues or cancels
 
@@ -30,16 +44,16 @@ The VS Code extension provides a simple setup UI — no manual configuration nee
 ### 2. Install the Extension
 
 ```bash
-cd telegram-approval/vscode-extension
+cd gatekeeper/vscode-extension
 npm install && npm run compile
 npx vsce package
-code --install-extension telegram-command-approval-*.vsix
+code --install-extension gatekeeper-remote-approval-*.vsix
 ```
 
 ### 3. Install Bot Dependencies
 
 ```bash
-cd telegram-approval
+cd gatekeeper
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -47,7 +61,7 @@ pip install -r requirements.txt
 
 ### 4. Configure via Extension UI
 
-1. Click **TG Approval** in the VS Code status bar
+1. Click **GateKeeper** in the VS Code sidebar (shield icon)
 2. Enter your bot token and chat ID
 3. Click **🚀 Start Approval Server**
 
@@ -79,10 +93,10 @@ For deeper Copilot agent integration, add the MCP server:
 {
     "mcp": {
         "servers": {
-            "telegram-approval": {
+            "gatekeeper": {
                 "type": "stdio",
-                "command": "/path/to/telegram-approval/.venv/bin/python",
-                "args": ["/path/to/telegram-approval/approval_mcp_server.py"]
+                "command": "/path/to/gatekeeper/.venv/bin/python",
+                "args": ["/path/to/gatekeeper/approval_mcp_server.py"]
             }
         }
     }
@@ -138,7 +152,7 @@ Response: `{"approved": true, "requestId": "..."}`
 
 ### macOS (launchd)
 
-Create `~/Library/LaunchAgents/com.telegram-approval.plist`:
+Create `~/Library/LaunchAgents/com.gatekeeper.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -146,7 +160,7 @@ Create `~/Library/LaunchAgents/com.telegram-approval.plist`:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.telegram-approval</string>
+    <string>com.gatekeeper</string>
     <key>ProgramArguments</key>
     <array>
         <string>/path/to/.venv/bin/python</string>
@@ -183,8 +197,8 @@ docker-compose up -d
 ## Architecture
 
 ```
-telegram-approval/
-├── bot.py                    # Telegram bot + HTTP server
+gatekeeper/
+├── bot.py                    # Telegram channel + HTTP server
 ├── approval_mcp_server.py    # MCP server for Copilot
 ├── config.json               # Bot configuration
 ├── requirements.txt          # Python dependencies

@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  telegram-approval:
+  gatekeeper:
     build: .
-    container_name: telegram-approval-bot
+    container_name: gatekeeper-server
     restart: unless-stopped
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}

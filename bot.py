@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Telegram Bot for VS Code Copilot Command Approval
+GateKeeper Bot - Telegram Channel for VS Code Copilot Command Approval
 
 This bot receives command approval requests from VS Code and lets you
 approve/reject them via Telegram inline buttons.
+
+More channels (Slack, WhatsApp, Discord) coming soon!
 """
 
 import asyncio
@@ -61,9 +63,9 @@ class ApprovalBot:
             return
         
         await message.reply_text(
-            "🤖 *VS Code Copilot Approval Bot*\n\n"
+            "\ud83d\udee1\ufe0f *GateKeeper - Remote Command Approval*\n\n"
             "I'll send you command approval requests from VS Code Copilot.\n"
-            "You can approve or reject commands right from Telegram!\n\n"
+            "You can approve or reject commands right from your phone!\n\n"
             f"Your Chat ID: `{update.effective_chat.id}`\n\n"
             "Commands:\n"
             "/status - Show pending approvals\n"
