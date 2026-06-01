@@ -58,7 +58,7 @@ export class SetupPanel {
             async (message) => {
                 switch (message.command) {
                     case 'saveAndStart':
-                        await this._saveAndStart(message.token, message.chatId, message.port);
+                        await this._saveAndStart(message.token, message.chatId, message.port, message.useExistingToken);
                         break;
                     case 'stop':
                         await this._stopBot();
@@ -124,10 +124,23 @@ export class SetupPanel {
         });
     }
 
-    private async _saveAndStart(token: string, chatId: string, port: number) {
+    private async _saveAndStart(token: string, chatId: string, port: number, useExistingToken: boolean = false) {
         try {
+            // Get existing token if using existing
+            let finalToken = token;
+            if (useExistingToken || !token) {
+                const existingToken = await this._context.secrets.get('telegramApproval.botToken');
+                if (existingToken) {
+                    finalToken = existingToken;
+                    log('Using existing saved token');
+                } else {
+                    this._showError('No saved token found. Please enter your bot token.');
+                    return;
+                }
+            }
+            
             // Validate inputs
-            if (!token || !token.includes(':')) {
+            if (!finalToken || !finalToken.includes(':')) {
                 this._showError('Invalid bot token. Get one from @BotFather on Telegram.');
                 return;
             }
@@ -137,8 +150,10 @@ export class SetupPanel {
                 return;
             }
 
-            // Save token securely
-            await this._context.secrets.store('telegramApproval.botToken', token);
+            // Save token securely (only if new token provided)
+            if (token && token.includes(':')) {
+                await this._context.secrets.store('telegramApproval.botToken', token);
+            }
             
             // Save other settings
             const config = vscode.workspace.getConfiguration('telegramApproval');
@@ -150,7 +165,7 @@ export class SetupPanel {
             log(`Saved configuration - ChatID: ${chatId}, Port: ${port}`);
 
             // Start the bot
-            await this._startBot(token, chatId, port);
+            await this._startBot(finalToken, chatId, port);
 
         } catch (error) {
             this._showError(`Failed to save settings: ${error}`);
@@ -693,8 +708,13 @@ export class SetupPanel {
     <div id="setup-form">
         <div class="form-group">
             <label for="token">Bot Token</label>
+            <div id="token-configured" style="display: none; margin-bottom: 8px;">
+                <span style="color: var(--vscode-descriptionForeground);">🔐 Token configured: </span>
+                <code id="token-masked"></code>
+                <button class="btn-link" onclick="changeToken()" style="margin-left: 8px;">Change</button>
+            </div>
             <input type="password" id="token" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz">
-            <p class="help-text">Get this from @BotFather after creating your bot</p>
+            <p class="help-text" id="token-help">Get this from @BotFather after creating your bot</p>
         </div>
 
         <div class="form-group">
@@ -741,13 +761,18 @@ export class SetupPanel {
         }
 
         function saveAndStart() {
-            const token = document.getElementById('token').value.trim();
+            const tokenInput = document.getElementById('token');
+            const tokenConfigured = document.getElementById('token-configured');
+            const token = tokenInput.value.trim();
             const chatId = document.getElementById('chatId').value.trim();
             const port = parseInt(document.getElementById('port').value) || 8765;
+            
+            // Check if token is configured (input is hidden) or newly entered
+            const useExistingToken = tokenConfigured.style.display !== 'none';
 
             hideMessages();
 
-            if (!token) {
+            if (!token && !useExistingToken) {
                 showError('Please enter your bot token');
                 return;
             }
@@ -759,11 +784,19 @@ export class SetupPanel {
             document.getElementById('start-btn').disabled = true;
             document.getElementById('start-btn').textContent = '⏳ Starting...';
 
-            vscode.postMessage({ command: 'saveAndStart', token, chatId, port });
+            // Send empty token to indicate "use existing"
+            vscode.postMessage({ command: 'saveAndStart', token: token || '', chatId, port, useExistingToken });
         }
 
         function stopBot() {
             vscode.postMessage({ command: 'stop' });
+        }
+
+        function changeToken() {
+            document.getElementById('token-configured').style.display = 'none';
+            document.getElementById('token').style.display = 'block';
+            document.getElementById('token-help').style.display = 'block';
+            document.getElementById('token').focus();
         }
 
         function testCommand() {
@@ -868,6 +901,13 @@ export class SetupPanel {
                 case 'status':
                     if (message.chatId) document.getElementById('chatId').value = message.chatId;
                     if (message.port) document.getElementById('port').value = message.port;
+                    // Show token status
+                    if (message.hasToken && message.token) {
+                        document.getElementById('token-configured').style.display = 'block';
+                        document.getElementById('token-masked').textContent = message.token;
+                        document.getElementById('token').style.display = 'none';
+                        document.getElementById('token-help').style.display = 'none';
+                    }
                     updateUI(message);
                     break;
                 case 'error':
