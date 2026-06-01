@@ -6,12 +6,13 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version bump type'
-        required: true
-        default: 'patch'
+      bump:
+        description: 'Version bump type (leave empty to publish current version)'
+        required: false
+        default: ''
         type: choice
         options:
+          - ''
           - patch
           - minor
           - major
@@ -38,7 +39,12 @@ jobs:
         run: npm run compile
 
       - name: Publish to VS Code Marketplace
-        run: npx @vscode/vsce publish ${{ github.event.inputs.version || 'patch' }} -p ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -n "${{ github.event.inputs.bump }}" ]; then
+            npx @vscode/vsce publish ${{ github.event.inputs.bump }} -p ${{ secrets.VSCE_PAT }}
+          else
+            npx @vscode/vsce publish -p ${{ secrets.VSCE_PAT }}
+          fi
 
       - name: Publish to Open VSX Registry
         run: npx ovsx publish -p ${{ secrets.OVSX_PAT }}
