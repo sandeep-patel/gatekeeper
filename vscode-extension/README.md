@@ -20,6 +20,7 @@ Approve VS Code Copilot terminal commands from your phone! 📱✅
 
 - **One-Click Setup**: Enter bot token and chat ID, click Start — that's it!
 - **Local-First Approval**: VS Code notification first, Telegram fallback
+- **Interactive Q&A**: Copilot can ask questions, you answer from VS Code or phone
 - **Race Condition Friendly**: Approve from VS Code OR Telegram — first wins
 - **Mobile Approval**: Approve or reject commands from anywhere
 - **Real-time Notifications**: Get instant alerts when Copilot wants to run a command
@@ -72,6 +73,22 @@ Approve VS Code Copilot terminal commands from your phone! 📱✅
 3. If no response within `localApprovalDelay` seconds (default: 10s)...
 4. Command **escalates to Telegram**
 5. Either channel can approve — **first response wins**
+
+### Ask User Flow (Interactive Q&A)
+
+Copilot can also ask questions and get responses:
+
+```
+ask_user(
+  question: "Which database should I use?",
+  options: ["PostgreSQL", "MySQL", "SQLite"],
+  context: "Setting up backend"
+)
+```
+
+- **VS Code**: Shows quick-pick with options + custom input
+- **Telegram**: Shows buttons + "✏️ Type custom answer..." option
+- **First response wins**: Answer from either channel
 
 ## Extension Commands
 

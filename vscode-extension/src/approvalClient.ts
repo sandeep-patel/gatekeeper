@@ -13,10 +13,17 @@ interface HealthResponse {
 }
 
 export interface PendingRequest {
+    type?: 'approval' | 'question';
     requestId: string;
-    command: string;
-    explanation: string;
-    goal: string;
+    // For approvals
+    command?: string;
+    explanation?: string;
+    goal?: string;
+    // For questions
+    question?: string;
+    context?: string;
+    options?: string[];
+    // Common
     timestamp: string;
 }
 
@@ -245,6 +252,16 @@ export class ApprovalClient {
         log(`Rejecting request locally: ${requestId}`);
         const result = await this.fetch(`/api/reject/${requestId}`, {
             method: 'POST',
+            timeout: 5,
+        });
+        return result.ok;
+    }
+
+    async localAnswer(requestId: string, answer: string): Promise<boolean> {
+        log(`Answering question locally: ${requestId} -> ${answer}`);
+        const result = await this.fetch(`/api/answer/${requestId}`, {
+            method: 'POST',
+            body: JSON.stringify({ answer }),
             timeout: 5,
         });
         return result.ok;

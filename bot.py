@@ -21,7 +21,9 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
+    MessageHandler,
     ContextTypes,
+    filters,
 )
 from aiohttp import web
 
@@ -44,6 +46,17 @@ class PendingApproval:
     response_future: asyncio.Future = field(default_factory=asyncio.Future)
 
 
+@dataclass
+class PendingQuestion:
+    """Represents a pending question for the user."""
+    request_id: str
+    question: str
+    context: str
+    options: list[str]
+    timestamp: datetime
+    response_future: asyncio.Future = field(default_factory=asyncio.Future)  # Resolves to str
+
+
 class ApprovalBot:
     """Telegram bot that handles command approval requests."""
 
@@ -53,6 +66,8 @@ class ApprovalBot:
         self.http_port = http_port
         self.local_approval_delay = local_approval_delay  # Seconds to wait for local approval before sending to Telegram
         self.pending_approvals: Dict[str, PendingApproval] = {}
+        self.pending_questions: Dict[str, PendingQuestion] = {}
+        self.awaiting_text_response: Optional[str] = None  # request_id of question awaiting text input
         self.app: Optional[Application] = None
         self.web_app: Optional[web.Application] = None
         self.web_runner: Optional[web.AppRunner] = None
@@ -122,11 +137,38 @@ class ApprovalBot:
         if not data:
             return
 
-        parts = data.split(":", 1)
-        if len(parts) != 2:
+        parts = data.split(":")
+        if len(parts) < 2:
             return
 
-        action, request_id = parts
+        action = parts[0]
+        request_id = parts[1]
+
+        # Handle question option selection
+        if action == "option" and len(parts) == 3:
+            option_index = int(parts[2])
+            if request_id in self.pending_questions:
+                question = self.pending_questions[request_id]
+                if 0 <= option_index < len(question.options):
+                    selected = question.options[option_index]
+                    await self._resolve_question(request_id, selected)
+                    await query.edit_message_text(
+                        f"✅ Answer: *{selected}*",
+                        parse_mode="Markdown",
+                    )
+                    return
+        
+        # Handle "type custom answer" button
+        if action == "custom":
+            if request_id in self.pending_questions:
+                self.awaiting_text_response = request_id
+                await query.edit_message_text(
+                    f"✏️ Type your answer and send it:",
+                    parse_mode="Markdown",
+                )
+                return
+
+        # Handle approval buttons
         approved = action == "approve"
 
         if request_id in self.pending_approvals:
@@ -140,7 +182,36 @@ class ApprovalBot:
                 parse_mode="Markdown",
             )
         else:
-            await query.edit_message_text("⚠️ This approval request has expired.")
+            await query.edit_message_text("⚠️ This request has expired.")
+
+    async def text_message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle text messages for free-form question responses."""
+        if not self.awaiting_text_response:
+            return
+        
+        message = update.message
+        if not message or not message.text:
+            return
+        
+        # Only accept from the configured chat
+        if message.chat_id != self.chat_id:
+            return
+        
+        request_id = self.awaiting_text_response
+        if request_id in self.pending_questions:
+            answer = message.text.strip()
+            await self._resolve_question(request_id, answer)
+            self.awaiting_text_response = None
+            await message.reply_text(f"✅ Answer recorded: *{answer}*", parse_mode="Markdown")
+
+    async def _resolve_question(self, request_id: str, answer: str) -> None:
+        """Resolve a question request with the user's answer."""
+        if request_id in self.pending_questions:
+            question = self.pending_questions.pop(request_id)
+            if not question.response_future.done():
+                question.response_future.set_result(answer)
+            if self.awaiting_text_response == request_id:
+                self.awaiting_text_response = None
 
     async def _resolve_approval(self, request_id: str, approved: bool) -> None:
         """Resolve an approval request."""
@@ -276,9 +347,10 @@ class ApprovalBot:
         })
 
     async def get_pending(self, request: web.Request) -> web.Response:
-        """Get list of pending approval requests."""
-        pending = [
+        """Get list of pending approval requests and questions."""
+        approvals = [
             {
+                "type": "approval",
                 "requestId": req_id,
                 "command": approval.command,
                 "explanation": approval.explanation,
@@ -287,7 +359,18 @@ class ApprovalBot:
             }
             for req_id, approval in self.pending_approvals.items()
         ]
-        return web.json_response({"pending": pending})
+        questions = [
+            {
+                "type": "question",
+                "requestId": req_id,
+                "question": q.question,
+                "context": q.context,
+                "options": q.options,
+                "timestamp": q.timestamp.isoformat(),
+            }
+            for req_id, q in self.pending_questions.items()
+        ]
+        return web.json_response({"pending": approvals + questions})
 
     async def local_approve(self, request: web.Request) -> web.Response:
         """Approve a pending request locally (from VS Code)."""
@@ -309,6 +392,144 @@ class ApprovalBot:
         logger.info(f"Request {request_id} rejected locally via VS Code")
         return web.json_response({"approved": False, "requestId": request_id})
 
+    async def handle_ask_request(self, request: web.Request) -> web.Response:
+        """Handle HTTP ask requests - send a question to user and wait for response."""
+        try:
+            data = await request.json()
+            
+            request_id = data.get("requestId", str(datetime.now().timestamp()))
+            question = data.get("question", "")
+            context_text = data.get("context", "")
+            options = data.get("options", [])
+            local_delay = data.get("localApprovalDelay")
+
+            if not question:
+                return web.json_response({"error": "question is required"}, status=400)
+
+            logger.info(f"Received question: {question[:50]}...")
+            
+            answer = await self.ask_user(
+                request_id=request_id,
+                question=question,
+                context=context_text,
+                options=options,
+                local_delay=local_delay,
+            )
+
+            return web.json_response({
+                "answer": answer,
+                "requestId": request_id,
+            })
+
+        except json.JSONDecodeError:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            logger.error(f"Error handling ask request: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def send_question_to_telegram(self, request_id: str, question: str, context: str, options: list[str]) -> bool:
+        """Send question to Telegram with option buttons."""
+        # Build keyboard with options
+        keyboard = []
+        for i, opt in enumerate(options):
+            keyboard.append([InlineKeyboardButton(opt, callback_data=f"option:{request_id}:{i}")])
+        
+        # Add "type custom answer" button
+        keyboard.append([InlineKeyboardButton("✏️ Type custom answer...", callback_data=f"custom:{request_id}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Format the message
+        message = "💬 *Question from Copilot*\n\n"
+        message += f"*{question}*\n"
+        if context:
+            message += f"\n_{context}_\n"
+        if options:
+            message += "\nSelect an option or type your own:"
+        else:
+            message += "\nType your answer:"
+
+        try:
+            await self.app.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
+            logger.info(f"Sent question {request_id} to Telegram")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send question to Telegram: {e}")
+            return False
+
+    async def ask_user(
+        self,
+        request_id: str,
+        question: str,
+        context: str = "",
+        options: list[str] | None = None,
+        local_delay: int | None = None,
+    ) -> str:
+        """Ask user a question with local-first flow."""
+        delay = local_delay if local_delay is not None else self.local_approval_delay
+        options = options or []
+        
+        # Create pending question (VS Code will see this via /api/pending)
+        pending = PendingQuestion(
+            request_id=request_id,
+            question=question,
+            context=context,
+            options=options,
+            timestamp=datetime.now(),
+        )
+        self.pending_questions[request_id] = pending
+        logger.info(f"Created pending question {request_id}, waiting {delay}s for local response...")
+
+        # Wait for local response first
+        try:
+            result = await asyncio.wait_for(
+                asyncio.shield(pending.response_future),
+                timeout=delay
+            )
+            logger.info(f"Question {request_id} answered locally: {result}")
+            return result
+        except asyncio.TimeoutError:
+            pass  # No local response, continue to Telegram
+
+        # Still pending - send to Telegram
+        if request_id not in self.pending_questions:
+            return pending.response_future.result() if pending.response_future.done() else ""
+
+        sent = await self.send_question_to_telegram(request_id, question, context, options)
+        if not sent:
+            self.pending_questions.pop(request_id, None)
+            return ""
+
+        # Wait for response
+        try:
+            result = await asyncio.wait_for(pending.response_future, timeout=300)  # 5 min timeout
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(f"Question {request_id} timed out")
+            self.pending_questions.pop(request_id, None)
+            return ""
+
+    async def local_answer(self, request: web.Request) -> web.Response:
+        """Answer a pending question locally (from VS Code)."""
+        request_id = request.match_info.get("request_id")
+        if request_id not in self.pending_questions:
+            return web.json_response({"error": "Question not found or already answered"}, status=404)
+        
+        try:
+            data = await request.json()
+            answer = data.get("answer", "")
+        except:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        
+        await self._resolve_question(request_id, answer)
+        logger.info(f"Question {request_id} answered locally via VS Code: {answer}")
+        return web.json_response({"answered": True, "requestId": request_id, "answer": answer})
+
     async def start_http_server(self) -> None:
         """Start the HTTP server for receiving approval requests."""
         self.web_app = web.Application()
@@ -317,6 +538,8 @@ class ApprovalBot:
         self.web_app.router.add_get("/api/pending", self.get_pending)
         self.web_app.router.add_post("/api/approve/{request_id}", self.local_approve)
         self.web_app.router.add_post("/api/reject/{request_id}", self.local_reject)
+        self.web_app.router.add_post("/api/ask", self.handle_ask_request)
+        self.web_app.router.add_post("/api/answer/{request_id}", self.local_answer)
 
         self.web_runner = web.AppRunner(self.web_app)
         await self.web_runner.setup()
@@ -341,6 +564,7 @@ class ApprovalBot:
         self.app.add_handler(CommandHandler("approveall", self.approve_all_command))
         self.app.add_handler(CommandHandler("rejectall", self.reject_all_command))
         self.app.add_handler(CallbackQueryHandler(self.button_callback))
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_message_handler))
 
         # Initialize
         await self.app.initialize()

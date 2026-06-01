@@ -99,6 +99,41 @@ async function requestApproval(
 }
 
 /**
+ * Ask user a question via GateKeeper
+ */
+async function askUser(
+    question: string,
+    context: string = '',
+    options: string[] = [],
+    timeout: number = DEFAULT_TIMEOUT,
+    localApprovalDelay: number = DEFAULT_LOCAL_DELAY
+): Promise<string> {
+    const requestId = `${Date.now()}-${process.pid}`;
+
+    try {
+        const response = await httpRequest(`${APPROVAL_SERVER_URL}/api/ask`, {
+            method: 'POST',
+            body: JSON.stringify({
+                requestId,
+                question,
+                context,
+                options,
+                localApprovalDelay,
+            }),
+            timeout: timeout * 1000,
+        });
+
+        if (response.status === 200 && response.data?.answer) {
+            return response.data.answer;
+        }
+        return '';
+    } catch (error) {
+        console.error('Ask request failed:', error);
+        return '';
+    }
+}
+
+/**
  * Run a shell command
  */
 async function runCommand(
@@ -126,7 +161,7 @@ async function runCommand(
 const server = new Server(
     {
         name: 'gatekeeper',
-        version: '0.7.0',
+        version: '0.8.0',
     },
     {
         capabilities: {
@@ -189,6 +224,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             inputSchema: {
                 type: 'object',
                 properties: {},
+            },
+        },
+        {
+            name: 'ask_user',
+            description:
+                'Ask the user a question and get their response. ' +
+                'Use this when you need clarification, want the user to choose between options, ' +
+                'or need additional context to proceed. The question will appear in VS Code first, ' +
+                'then escalate to Telegram if not answered locally.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    question: {
+                        type: 'string',
+                        description: 'The question to ask the user',
+                    },
+                    context: {
+                        type: 'string',
+                        description: 'Additional context or background for the question',
+                    },
+                    options: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Optional list of suggested answers (user can also type a custom response)',
+                    },
+                    local_approval_delay: {
+                        type: 'integer',
+                        description: 'Seconds to wait for local VS Code response before escalating to Telegram (default: 10)',
+                        default: 10,
+                    },
+                },
+                required: ['question'],
             },
         },
     ],
@@ -281,6 +348,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         return {
             content: [{ type: 'text', text: outputParts.join('\n') }],
+        };
+    }
+
+    if (name === 'ask_user') {
+        const question = (args?.question as string) || '';
+        const context = (args?.context as string) || '';
+        const options = (args?.options as string[]) || [];
+        const localDelay = (args?.local_approval_delay as number) || DEFAULT_LOCAL_DELAY;
+
+        if (!question) {
+            return {
+                content: [{ type: 'text', text: 'Error: question is required' }],
+            };
+        }
+
+        const answer = await askUser(question, context, options, DEFAULT_TIMEOUT, localDelay);
+
+        if (!answer) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `⚠️ No response received for question: "${question}"\n\nThe user may have timed out or the server is not running.`,
+                    },
+                ],
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `💬 User responded: **${answer}**`,
+                },
+            ],
         };
     }
 

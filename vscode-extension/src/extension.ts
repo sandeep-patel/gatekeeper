@@ -184,9 +184,15 @@ function stopPendingPoll() {
 }
 
 async function showApprovalNotification(req: PendingRequest) {
-    const cmdPreview = req.command.length > 60 
-        ? req.command.substring(0, 60) + '...' 
-        : req.command;
+    // Handle questions differently from approvals
+    if (req.type === 'question') {
+        await showQuestionNotification(req);
+        return;
+    }
+    
+    const cmdPreview = (req.command || '').length > 60 
+        ? (req.command || '').substring(0, 60) + '...' 
+        : (req.command || '');
     
     const message = req.goal 
         ? `🔐 ${req.goal}\n\n${cmdPreview}`
@@ -231,12 +237,78 @@ async function showApprovalNotification(req: PendingRequest) {
         outputChannel.appendLine(`Request ID: ${req.requestId}`);
         outputChannel.appendLine(`Goal: ${req.goal || 'N/A'}`);
         outputChannel.appendLine(`Explanation: ${req.explanation || 'N/A'}`);
-        outputChannel.appendLine(`Command:\n${req.command}`);
+        outputChannel.appendLine(`Command:\n${req.command || 'N/A'}`);
         outputChannel.appendLine('---\n');
         outputChannel.show();
         // Re-show the notification
         shownNotifications.delete(req.requestId);
     }
+}
+
+async function showQuestionNotification(req: PendingRequest) {
+    const question = req.question || 'Question from Copilot';
+    const options = req.options || [];
+    
+    log(`Showing question notification for request: ${req.requestId}`);
+    
+    // Build quick pick items from options
+    const items: vscode.QuickPickItem[] = options.map(opt => ({
+        label: opt,
+        description: ''
+    }));
+    
+    // Add custom answer option
+    items.push({
+        label: '✏️ Type custom answer...',
+        description: 'Enter your own response'
+    });
+    
+    // Show quick pick with options
+    const contextText = req.context ? `\n\n${req.context}` : '';
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: question + contextText,
+        title: '💬 Question from Copilot',
+        ignoreFocusOut: true
+    });
+    
+    // Request might already be resolved by Telegram
+    if (!shownNotifications.has(req.requestId)) {
+        return;
+    }
+    
+    if (!selected) {
+        // User cancelled - re-show later
+        shownNotifications.delete(req.requestId);
+        return;
+    }
+    
+    let answer: string;
+    
+    if (selected.label === '✏️ Type custom answer...') {
+        // Show input box for custom answer
+        const customAnswer = await vscode.window.showInputBox({
+            prompt: question,
+            placeHolder: 'Type your answer...',
+            ignoreFocusOut: true
+        });
+        
+        if (!customAnswer) {
+            shownNotifications.delete(req.requestId);
+            return;
+        }
+        answer = customAnswer;
+    } else {
+        answer = selected.label;
+    }
+    
+    const success = await approvalClient.localAnswer(req.requestId, answer);
+    if (success) {
+        log(`Question ${req.requestId} answered via VS Code: ${answer}`);
+        vscode.window.showInformationMessage(`✅ Answered: ${answer}`);
+    } else {
+        vscode.window.showWarningMessage('⚠️ Already answered (possibly via Telegram)');
+    }
+    shownNotifications.delete(req.requestId);
 }
 
 function updateStatusBarHealth(connected: boolean, pendingCount?: number) {

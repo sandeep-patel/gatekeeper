@@ -39,6 +39,27 @@ Approve VS Code Copilot terminal commands from your phone! 📱✅
 4. Command **escalates to Telegram**
 5. Either channel can approve — **first response wins**
 
+### Ask User Flow (Interactive Q&A)
+
+Copilot can also ask questions and get responses:
+
+```
+Copilot: "Which database should I use?"
+    ↓
+ask_user(question: "Which database?", options: ["PostgreSQL", "MySQL", "SQLite"])
+    ↓
+VS Code shows quick-pick with options (or Telegram buttons)
+    ↓
+User selects "PostgreSQL" or types custom answer
+    ↓
+Copilot receives "PostgreSQL" and continues
+```
+
+**MCP Tools:**
+- `run_approved_command` — Run a command with approval
+- `ask_user` — Ask a question and get a response
+- `check_approval_server` — Check if server is healthy
+
 ## Quick Start (Recommended) 🌟
 
 The VS Code extension provides a simple setup UI — no manual configuration needed!
