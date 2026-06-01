@@ -1,0 +1,83 @@
+{
+    "name": "telegram-command-approval",
+    "displayName": "Telegram Command Approval",
+    "description": "Route VS Code Copilot command approvals to Telegram",
+    "version": "0.1.1",
+    "publisher": "technologica",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "telegramApproval.configure",
+                "title": "Telegram Approval: Configure"
+            },
+            {
+                "command": "telegramApproval.testConnection",
+                "title": "Telegram Approval: Test Connection"
+            },
+            {
+                "command": "telegramApproval.enable",
+                "title": "Telegram Approval: Enable"
+            },
+            {
+                "command": "telegramApproval.disable",
+                "title": "Telegram Approval: Disable"
+            }
+        ],
+        "configuration": {
+            "title": "Telegram Command Approval",
+            "properties": {
+                "telegramApproval.enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable Telegram-based command approval"
+                },
+                "telegramApproval.serverUrl": {
+                    "type": "string",
+                    "default": "http://localhost:8765",
+                    "description": "URL of the Telegram approval bot HTTP server"
+                },
+                "telegramApproval.timeoutSeconds": {
+                    "type": "number",
+                    "default": 300,
+                    "description": "Timeout in seconds for approval requests"
+                },
+                "telegramApproval.autoApprovePatterns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "Regex patterns for commands to auto-approve"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "lint": "eslint src --ext ts"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.85.0",
+        "@typescript-eslint/eslint-plugin": "^6.0.0",
+        "@typescript-eslint/parser": "^6.0.0",
+        "@vscode/vsce": "^3.9.1",
+        "eslint": "^8.0.0",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "node-fetch": "^3.3.0"
+    }
+}
