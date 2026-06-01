@@ -64,7 +64,7 @@ export class SetupPanel {
                         await this._stopBot();
                         break;
                     case 'testConnection':
-                        await this._testConnection(message.port);
+                        await this._testCommand(message.port);
                         break;
                     case 'getStatus':
                         await this._sendStatus();
@@ -338,53 +338,86 @@ export class SetupPanel {
         await this._sendStatus();
     }
 
-    private async _testConnection(port: number) {
+    private async _testCommand(port: number) {
+        log(`Testing command approval via Telegram on port ${port}...`);
+        
+        // Notify UI we're waiting for Telegram
+        this._panel.webview.postMessage({
+            command: 'testWaiting',
+        });
+        
         try {
             const http = await import('http');
-            await new Promise<boolean>((resolve) => {
+            const testCommand = 'echo "Connection test successful!"';
+            const requestBody = JSON.stringify({
+                requestId: `test-${Date.now()}`,
+                command: testCommand,
+                explanation: 'Test command from VS Code extension setup',
+                goal: 'Verify Telegram approval flow is working',
+            });
+            
+            const result = await new Promise<{approved: boolean; error?: string}>((resolve) => {
                 const req = http.request(
-                    { hostname: 'localhost', port, path: '/health', method: 'GET', timeout: 3000 },
+                    { 
+                        hostname: 'localhost', 
+                        port, 
+                        path: '/approve', 
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Content-Length': Buffer.byteLength(requestBody),
+                        },
+                        timeout: 120000, // 2 minute timeout for approval
+                    },
                     (res) => {
                         let data = '';
                         res.on('data', chunk => data += chunk);
                         res.on('end', () => {
+                            log(`Approval response: ${data}`);
                             try {
                                 const json = JSON.parse(data);
-                                this._panel.webview.postMessage({
-                                    command: 'connectionResult',
-                                    success: true,
-                                    pending: json.pending_approvals || 0,
-                                });
-                                resolve(true);
-                            } catch {
-                                this._panel.webview.postMessage({
-                                    command: 'connectionResult',
-                                    success: false,
-                                });
-                                resolve(false);
+                                resolve({ approved: json.approved === true });
+                            } catch (e) {
+                                log(`JSON parse error: ${e}`);
+                                resolve({ approved: false, error: 'Invalid response' });
                             }
                         });
                     }
                 );
-                req.on('error', () => {
-                    this._panel.webview.postMessage({
-                        command: 'connectionResult',
-                        success: false,
-                    });
-                    resolve(false);
+                req.on('error', (e) => {
+                    log(`Connection error: ${e}`);
+                    resolve({ approved: false, error: e.message });
                 });
                 req.on('timeout', () => {
+                    log('Approval request timeout');
                     req.destroy();
-                    this._panel.webview.postMessage({
-                        command: 'connectionResult',
-                        success: false,
-                    });
-                    resolve(false);
+                    resolve({ approved: false, error: 'Timeout waiting for approval' });
                 });
+                req.write(requestBody);
                 req.end();
             });
-        } catch {
-            this._panel.webview.postMessage({ command: 'connectionResult', success: false });
+            
+            this._panel.webview.postMessage({
+                command: 'testResult',
+                approved: result.approved,
+                error: result.error,
+            });
+            
+            if (result.approved) {
+                vscode.window.showInformationMessage('✅ Test command approved! Everything is working.');
+            } else if (result.error) {
+                vscode.window.showWarningMessage(`❌ Test failed: ${result.error}`);
+            } else {
+                vscode.window.showWarningMessage('❌ Test command was rejected.');
+            }
+            
+        } catch (e) {
+            log(`Test command exception: ${e}`);
+            this._panel.webview.postMessage({ 
+                command: 'testResult', 
+                approved: false, 
+                error: String(e) 
+            });
         }
     }
 
@@ -689,8 +722,8 @@ export class SetupPanel {
             <button id="stop-btn" class="btn-danger" onclick="stopBot()" style="display: none;">
                 ⏹️ Stop
             </button>
-            <button id="test-btn" class="btn-secondary" onclick="testConnection()" style="display: none;">
-                🔍 Test
+            <button id="test-btn" class="btn-secondary" onclick="testCommand()" style="display: none;">
+                📱 Test Command
             </button>
         </div>
     </div>
@@ -733,10 +766,13 @@ export class SetupPanel {
             vscode.postMessage({ command: 'stop' });
         }
 
-        function testConnection() {
+        function testCommand() {
             const port = parseInt(document.getElementById('port').value) || 8765;
+            console.log('testCommand clicked, port:', port);
             document.getElementById('test-btn').disabled = true;
-            document.getElementById('test-btn').textContent = '⏳ Testing...';
+            document.getElementById('test-btn').textContent = '📱 Waiting for Telegram...';
+            hideMessages();
+            showSuccess('Command sent to Telegram. Check your phone to approve/reject!');
             vscode.postMessage({ command: 'testConnection', port });
         }
 
@@ -827,6 +863,7 @@ export class SetupPanel {
 
         window.addEventListener('message', event => {
             const message = event.data;
+            console.log('Received message:', message);
             switch (message.command) {
                 case 'status':
                     if (message.chatId) document.getElementById('chatId').value = message.chatId;
@@ -843,12 +880,31 @@ export class SetupPanel {
                     showSuccess('Server started! Send a command from Copilot to test.');
                     break;
                 case 'connectionResult':
+                    console.log('connectionResult received:', message);
                     document.getElementById('test-btn').disabled = false;
-                    document.getElementById('test-btn').textContent = '🔍 Test';
+                    document.getElementById('test-btn').textContent = '� Test Command';
                     if (message.success) {
                         showSuccess('Connected! ' + (message.pending || 0) + ' pending approval(s)');
                     } else {
                         showError('Cannot connect to server');
+                    }
+                    break;
+                case 'testWaiting':
+                    console.log('testWaiting received');
+                    document.getElementById('test-btn').disabled = true;
+                    document.getElementById('test-btn').textContent = '📱 Waiting for Telegram...';
+                    break;
+                case 'testResult':
+                    console.log('testResult received:', message);
+                    document.getElementById('test-btn').disabled = false;
+                    document.getElementById('test-btn').textContent = '📱 Test Command';
+                    hideMessages();
+                    if (message.approved) {
+                        showSuccess('✅ Test command approved! Everything is working.');
+                    } else if (message.error) {
+                        showError('Test failed: ' + message.error);
+                    } else {
+                        showError('Test command was rejected.');
                     }
                     break;
             }
