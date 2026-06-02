@@ -267,6 +267,9 @@ export class SetupPanel {
             vscode.window.showInformationMessage('✅ GateKeeper server started successfully!');
             log('Bot started successfully');
             
+            // Trigger immediate sidebar/status bar update (silent, no notification)
+            vscode.commands.executeCommand('gatekeeper.refreshStatus');
+            
             // Auto-register MCP server
             await this._registerMcpServer(pythonPath, botScriptPath, port);
         } else if (botProcess && !botProcess.killed) {

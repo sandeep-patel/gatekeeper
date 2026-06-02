@@ -57,6 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('gatekeeper.setup', () => SetupPanel.createOrShow(context)),
         vscode.commands.registerCommand('gatekeeper.configure', configure),
         vscode.commands.registerCommand('gatekeeper.testConnection', testConnection),
+        vscode.commands.registerCommand('gatekeeper.refreshStatus', refreshStatus),
         vscode.commands.registerCommand('gatekeeper.enable', enable),
         vscode.commands.registerCommand('gatekeeper.disable', disable),
         vscode.commands.registerCommand('gatekeeper.showLogs', showLogs),
@@ -456,6 +457,12 @@ async function testConnection() {
             `❌ Connection failed: ${result.error}`
         );
     }
+}
+
+/** Silent status refresh - updates sidebar and status bar without showing notifications */
+async function refreshStatus() {
+    const result = await approvalClient.testConnection();
+    updateStatusBarHealth(result.success, result.pendingApprovals);
 }
 
 async function showLogs() {
