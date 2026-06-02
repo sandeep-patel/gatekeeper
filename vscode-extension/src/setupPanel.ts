@@ -156,6 +156,13 @@ export class SetupPanel {
                 return;
             }
 
+            // Validate port range (1024-65535; privileged ports require root)
+            const portNum = Number(port);
+            if (!Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
+                this._showError(`Invalid port ${port}. Use a number between 1024 and 65535 (ports below 1024 require root).`);
+                return;
+            }
+
             // Save token securely (only if new token provided)
             if (token && token.includes(':')) {
                 await this._context.secrets.store('gatekeeper.botToken', token);
@@ -221,6 +228,11 @@ export class SetupPanel {
             return;
         }
 
+        // Buffer the last bit of stderr so we can surface a useful error if the bot dies
+        // before the health endpoint comes up.
+        const stderrBuffer: string[] = [];
+        const STDERR_BUFFER_MAX = 50; // keep last 50 lines
+
         // Start the bot process
         botProcess = spawn(runtimePython, [botScriptPath], {
             env: {
@@ -241,6 +253,10 @@ export class SetupPanel {
         botProcess.stderr?.on('data', (data) => {
             const output = data.toString().trim();
             log(`[Bot Error] ${output}`);
+            stderrBuffer.push(output);
+            if (stderrBuffer.length > STDERR_BUFFER_MAX) {
+                stderrBuffer.splice(0, stderrBuffer.length - STDERR_BUFFER_MAX);
+            }
         });
 
         botProcess.on('error', (error) => {
@@ -288,10 +304,61 @@ export class SetupPanel {
         } else if (botProcess && !botProcess.killed) {
             // Process is running but server not responding
             log('Bot process running but server not responding to health checks');
-            this._panel.webview.postMessage({ command: 'error', message: 'Server started but not responding. Check logs.' });
+            this._panel.webview.postMessage({ command: 'error', message: 'Server started but not responding to /health. Check GateKeeper logs.' });
+        } else {
+            // Process died before becoming healthy — translate stderr into a friendly error.
+            const tail = stderrBuffer.join('\n');
+            const friendly = this._diagnoseBotFailure(tail, port);
+            this._panel.webview.postMessage({ command: 'error', message: friendly });
+            vscode.window.showErrorMessage(friendly);
         }
 
         await this._sendStatus();
+    }
+
+    /**
+     * Convert a chunk of bot stderr into a human-friendly error message that tells
+     * the user exactly what to do. Falls back to a generic message with the tail
+     * appended if no known pattern matches.
+     */
+    private _diagnoseBotFailure(stderrTail: string, port: number): string {
+        const s = stderrTail.toLowerCase();
+
+        if (s.includes('address already in use') || s.includes('eaddrinuse') || s.includes('errno 48') || s.includes('errno 98')) {
+            return `Port ${port} is already in use. Either change the port in GateKeeper Setup or stop the process using it (try: lsof -ti:${port} | xargs kill -9).`;
+        }
+
+        if (s.includes('permission denied') && (s.includes("port") || s.includes('bind'))) {
+            return `Permission denied binding to port ${port}. Pick a port above 1024 in GateKeeper Setup.`;
+        }
+
+        if (s.includes('unauthorized') || s.includes('401') || s.includes('invalid token')) {
+            return 'Telegram rejected the bot token (401 Unauthorized). Get a fresh token from @BotFather and paste it in GateKeeper Setup → Change.';
+        }
+
+        if (s.includes('chat not found') || s.includes('chat_id is empty') || s.includes("bot can't initiate conversation")) {
+            return 'Telegram could not deliver to your Chat ID. Open the bot in Telegram and send /start, then re-check the Chat ID in Setup.';
+        }
+
+        if (s.includes('network is unreachable') || s.includes('temporary failure in name resolution') || s.includes('getaddrinfo') || s.includes('connection refused') || s.includes('ssl') && s.includes('handshake')) {
+            return 'Network error reaching Telegram. Check your internet connection / corporate proxy / firewall, then click Start again.';
+        }
+
+        if (s.includes('modulenotfounderror') || s.includes('no module named')) {
+            const match = stderrTail.match(/No module named ['\"]([^'\"]+)['\"]/);
+            const mod = match ? match[1] : 'a required module';
+            return `Bot failed to import ${mod}. The auto-install may have been incomplete — try restarting (the managed venv will rebuild) or check GateKeeper logs.`;
+        }
+
+        if (s.includes('syntaxerror')) {
+            return 'Python rejected the bot script (SyntaxError). Your Python version may be too old — install Python 3.8+ and restart.';
+        }
+
+        // Generic fallback: show the last few lines verbatim so the user has something to copy/paste.
+        const lines = stderrTail.split('\n').filter(Boolean).slice(-5).join('\n');
+        return lines
+            ? `Bot exited before becoming ready. Last error output:\n${lines}\n\nSee GateKeeper logs for full details.`
+            : 'Bot exited before becoming ready and produced no error output. See GateKeeper logs.';
     }
 
     private async _registerMcpServer(_pythonPath: string, _botScriptPath: string, port: number) {
@@ -649,40 +716,57 @@ export class SetupPanel {
 
     private async _findPython(): Promise<string | undefined> {
         const { execSync } = await import('child_process');
-        
-        const pythonCommands = ['python3', 'python', '/usr/bin/python3', '/usr/local/bin/python3'];
-        
+
+        const pythonCommands = ['python3', 'python', '/usr/bin/python3', '/usr/local/bin/python3', '/opt/homebrew/bin/python3'];
+
+        // Returns the python path if it is >= 3.8, otherwise undefined.
+        const versionOk = (cmd: string): string | undefined => {
+            try {
+                const out = execSync(`${cmd} --version`, { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+                const m = out.match(/Python\s+(\d+)\.(\d+)/i);
+                if (!m) {
+                    log(`Could not parse version from ${cmd}: ${out}`);
+                    return undefined;
+                }
+                const major = parseInt(m[1], 10);
+                const minor = parseInt(m[2], 10);
+                if (major < 3 || (major === 3 && minor < 8)) {
+                    log(`Python at ${cmd} is too old (${out}); need 3.8+`);
+                    return undefined;
+                }
+                log(`Found Python at ${cmd} (${out})`);
+                return cmd;
+            } catch {
+                return undefined;
+            }
+        };
+
         // Check for venv in bot directory
         const botPath = await this._findBotScript();
         if (botPath) {
             const venvPython = path.join(path.dirname(botPath), '.venv', 'bin', 'python');
             if (fs.existsSync(venvPython)) {
-                log(`Found Python venv at ${venvPython}`);
-                return venvPython;
+                const ok = versionOk(venvPython);
+                if (ok) return ok;
             }
         }
-        
+
         // Check for venv in workspace root
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (workspaceRoot) {
             const workspaceVenv = path.join(workspaceRoot, '.venv', 'bin', 'python');
             if (fs.existsSync(workspaceVenv)) {
-                log(`Found Python venv at ${workspaceVenv}`);
-                return workspaceVenv;
+                const ok = versionOk(workspaceVenv);
+                if (ok) return ok;
             }
         }
 
         for (const cmd of pythonCommands) {
-            try {
-                execSync(`${cmd} --version`, { stdio: 'pipe' });
-                log(`Found Python at ${cmd}`);
-                return cmd;
-            } catch {
-                continue;
-            }
+            const ok = versionOk(cmd);
+            if (ok) return ok;
         }
 
-        log('Python not found');
+        log('Python 3.8+ not found');
         return undefined;
     }
 
