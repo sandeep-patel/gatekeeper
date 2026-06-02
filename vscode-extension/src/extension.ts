@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ApprovalClient, setLogger, PendingRequest } from './approvalClient';
 import { CommandInterceptor } from './commandInterceptor';
-import { SetupPanel, setOutputChannel, stopBotProcess, isBotRunning, ensureMcpRegistration } from './setupPanel';
+import { SetupPanel, setOutputChannel, stopBotProcess, isBotRunning, isBotStarting, ensureMcpRegistration } from './setupPanel';
 import { SidebarViewProvider } from './sidebarWebviewProvider';
 
 let approvalClient: ApprovalClient;
@@ -315,10 +315,11 @@ function updateStatusBarHealth(connected: boolean, pendingCount?: number) {
     const config = vscode.workspace.getConfiguration('gatekeeper');
     const enabled = config.get<boolean>('enabled');
     const running = isBotRunning();
+    const starting = isBotStarting();
     const hasToken = !!(config.get<string>('chatId')); // If chatId is set, assume token is too
     
     // Update sidebar
-    sidebarProvider.updateStatus(connected, pendingCount || 0, running || connected, hasToken || connected);
+    sidebarProvider.updateStatus(connected, pendingCount || 0, running || connected, hasToken || connected, starting);
     
     // Start/stop pending request polling based on connection
     if (connected && enabled) {
