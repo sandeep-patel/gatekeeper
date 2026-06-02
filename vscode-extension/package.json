@@ -13,7 +13,17 @@
         "vscode": "^1.85.0"
     },
     "categories": [
-        "Other"
+        "Machine Learning",
+        "Chat"
+    ],
+    "keywords": [
+        "copilot",
+        "ai",
+        "approval",
+        "telegram",
+        "remote",
+        "security",
+        "mcp"
     ],
     "activationEvents": [
         "onStartupFinished"
