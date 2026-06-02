@@ -212,16 +212,17 @@ export class SetupPanel {
         log(`Starting bot with Python: ${pythonPath}`);
         log(`Bot script: ${botScriptPath}`);
 
-        // Ensure Python dependencies are installed (auto-install on first run)
-        const depsOk = await this._ensureBotDeps(pythonPath, botScriptPath);
-        if (!depsOk) {
+        // Ensure Python dependencies are installed (auto-install on first run).
+        // Returns the python interpreter to actually use (may be a managed venv).
+        const runtimePython = await this._ensureBotDeps(pythonPath, botScriptPath);
+        if (!runtimePython) {
             botStarting = false;
             this._sendStatus();
             return;
         }
 
         // Start the bot process
-        botProcess = spawn(pythonPath, [botScriptPath], {
+        botProcess = spawn(runtimePython, [botScriptPath], {
             env: {
                 ...process.env,
                 TELEGRAM_BOT_TOKEN: token,
@@ -283,7 +284,7 @@ export class SetupPanel {
             vscode.commands.executeCommand('gatekeeper.refreshStatus');
             
             // Auto-register MCP server
-            await this._registerMcpServer(pythonPath, botScriptPath, port);
+            await this._registerMcpServer(runtimePython, botScriptPath, port);
         } else if (botProcess && !botProcess.killed) {
             // Process is running but server not responding
             log('Bot process running but server not responding to health checks');
@@ -534,68 +535,114 @@ export class SetupPanel {
         return undefined;
     }
 
-    private async _ensureBotDeps(pythonPath: string, botScriptPath: string): Promise<boolean> {
-        // Quick check: can Python import the required modules?
-        const checkResult = await new Promise<boolean>((resolve) => {
-            const check = spawn(pythonPath, [
-                '-c',
-                'import telegram, aiohttp, mcp',
-            ], { stdio: 'pipe' });
+    /**
+     * Ensure bot dependencies are importable. Returns the python interpreter
+     * to actually use to run the bot (which may be a managed venv we create
+     * inside the extension's globalStorage). Returns undefined on failure.
+     *
+     * Strategy:
+     *   1. If the given pythonPath can already import telegram/aiohttp/mcp → use it as-is.
+     *   2. Otherwise locate or create a managed venv at <globalStorage>/venv,
+     *      install requirements there, and return the venv's python.
+     *      This avoids PEP 668 ("externally-managed-environment") errors on
+     *      modern macOS/Linux system Pythons and avoids needing sudo.
+     */
+    private async _ensureBotDeps(pythonPath: string, botScriptPath: string): Promise<string | undefined> {
+        const canImport = (py: string) => new Promise<boolean>((resolve) => {
+            const check = spawn(py, ['-c', 'import telegram, aiohttp, mcp'], { stdio: 'pipe' });
             check.on('exit', (code) => resolve(code === 0));
             check.on('error', () => resolve(false));
         });
 
-        if (checkResult) {
-            log('Bot dependencies already installed');
-            return true;
+        // 1. Does the system python already have everything?
+        if (await canImport(pythonPath)) {
+            log(`Bot dependencies already installed on ${pythonPath}`);
+            return pythonPath;
         }
 
-        log('Bot dependencies missing — attempting auto-install');
+        // 2. Check the managed venv (may already exist from a previous run)
+        const venvDir = path.join(this._context.globalStorageUri.fsPath, 'venv');
+        const venvPython = process.platform === 'win32'
+            ? path.join(venvDir, 'Scripts', 'python.exe')
+            : path.join(venvDir, 'bin', 'python');
 
-        // Locate requirements.txt (bundled next to bot.py)
+        if (fs.existsSync(venvPython) && await canImport(venvPython)) {
+            log(`Bot dependencies present in managed venv ${venvPython}`);
+            return venvPython;
+        }
+
+        // 3. Locate requirements.txt (bundled next to bot.py)
         const reqPath = path.join(path.dirname(botScriptPath), 'requirements.txt');
         if (!fs.existsSync(reqPath)) {
-            this._showError(`Cannot auto-install: requirements.txt not found at ${reqPath}. Run: ${pythonPath} -m pip install python-telegram-bot aiohttp mcp`);
-            return false;
+            this._showError(`Cannot auto-install: requirements.txt not found at ${reqPath}`);
+            return undefined;
         }
 
-        // Run pip install with progress notification
+        log(`Bot dependencies missing — creating managed venv at ${venvDir}`);
+
+        // Ensure parent directory exists
+        const parent = path.dirname(venvDir);
+        if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+
+        const runStep = (cmd: string, args: string[], label: string) =>
+            new Promise<boolean>((resolve) => {
+                log(`Running: ${cmd} ${args.join(' ')}`);
+                const proc = spawn(cmd, args, { stdio: 'pipe' });
+                proc.stdout?.on('data', (d) => log(`[${label}] ${d.toString().trim()}`));
+                proc.stderr?.on('data', (d) => log(`[${label}] ${d.toString().trim()}`));
+                proc.on('exit', (code) => resolve(code === 0));
+                proc.on('error', (err) => {
+                    log(`[${label}] failed to spawn: ${err.message}`);
+                    resolve(false);
+                });
+            });
+
         return await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: 'GateKeeper: Installing Python dependencies (first-run setup)…',
+                title: 'GateKeeper: setting up Python environment (first-run, ~30s)…',
                 cancellable: false,
             },
-            async () => {
-                return new Promise<boolean>((resolve) => {
-                    // Prefer --user install to avoid permission issues; ignored if inside a venv
-                    const args = ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', reqPath];
-                    // Only add --user if Python is not a venv (venv installs always succeed without --user)
-                    const isVenv = pythonPath.includes('.venv') || pythonPath.includes('venv');
-                    if (!isVenv) args.push('--user');
+            async (progress) => {
+                // Create venv if missing
+                if (!fs.existsSync(venvPython)) {
+                    progress.report({ message: 'creating virtual environment' });
+                    const created = await runStep(pythonPath, ['-m', 'venv', venvDir], 'venv');
+                    if (!created || !fs.existsSync(venvPython)) {
+                        this._showError(
+                            `Failed to create venv at ${venvDir}. Ensure the 'venv' module is available (on Debian/Ubuntu: apt install python3-venv). See GateKeeper logs.`
+                        );
+                        return undefined;
+                    }
+                }
 
-                    log(`Running: ${pythonPath} ${args.join(' ')}`);
-                    const pip = spawn(pythonPath, args, { stdio: 'pipe' });
+                // Upgrade pip inside the venv (best-effort)
+                progress.report({ message: 'upgrading pip' });
+                await runStep(venvPython, ['-m', 'pip', 'install', '--upgrade', '--disable-pip-version-check', 'pip'], 'pip');
 
-                    pip.stdout?.on('data', (d) => log(`[pip] ${d.toString().trim()}`));
-                    pip.stderr?.on('data', (d) => log(`[pip] ${d.toString().trim()}`));
+                // Install requirements into the venv
+                progress.report({ message: 'installing dependencies' });
+                const installed = await runStep(
+                    venvPython,
+                    ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', reqPath],
+                    'pip'
+                );
+                if (!installed) {
+                    this._showError(
+                        `pip install failed inside managed venv. Check GateKeeper logs. You can retry manually: ${venvPython} -m pip install -r ${reqPath}`
+                    );
+                    return undefined;
+                }
 
-                    pip.on('exit', (code) => {
-                        if (code === 0) {
-                            log('pip install succeeded');
-                            vscode.window.showInformationMessage('✅ GateKeeper: Python dependencies installed');
-                            resolve(true);
-                        } else {
-                            this._showError(`pip install failed (exit ${code}). Check GateKeeper logs. You may need to run manually: ${pythonPath} -m pip install -r ${reqPath}`);
-                            resolve(false);
-                        }
-                    });
+                // Verify
+                if (!(await canImport(venvPython))) {
+                    this._showError('Dependencies installed but import check still failed. See GateKeeper logs.');
+                    return undefined;
+                }
 
-                    pip.on('error', (err) => {
-                        this._showError(`Failed to run pip: ${err.message}`);
-                        resolve(false);
-                    });
-                });
+                log(`Managed venv ready at ${venvPython}`);
+                vscode.window.showInformationMessage('✅ GateKeeper: Python environment ready');
+                return venvPython;
             }
         );
     }
