@@ -4,7 +4,9 @@
  *
  * Goal: remove the `gatekeeper` entry from every VS Code-family `mcp.json`
  * we can find, so the user isn't left with a dangling MCP server pointing at
- * a deleted file. Anything else in their mcp.json is left alone.
+ * a deleted file. Anything else in their mcp.json is left alone. We also remove
+ * the Claude Code PreToolUse hook (~/.claude/hooks script + settings.json entry)
+ * the extension may have installed.
  *
  * This script must be self-contained — by the time it runs the extension's
  * node_modules are gone, so jsonc-parser is bundled in via esbuild.
@@ -87,6 +89,66 @@ function removeGatekeeperFrom(mcpPath: string): void {
     }
 }
 
+const CLAUDE_HOOK_FILE = 'gatekeeper-claude-approval.py';
+
+/**
+ * Remove the Claude Code hook the extension installed: the bundled script copied
+ * into ~/.claude/hooks, and any PreToolUse group in ~/.claude/settings.json whose
+ * hooks all reference our script. Groups containing unrelated hooks are left alone.
+ */
+function removeClaudeCodeHook(): void {
+    const claudeDir = path.join(os.homedir(), '.claude');
+
+    // 1. Delete the copied hook script.
+    try {
+        fs.unlinkSync(path.join(claudeDir, 'hooks', CLAUDE_HOOK_FILE));
+    } catch {
+        // Not present — fine.
+    }
+
+    // 2. Remove our PreToolUse group(s) from settings.json, preserving the rest.
+    const settingsPath = path.join(claudeDir, 'settings.json');
+    let content: string;
+    try {
+        content = fs.readFileSync(settingsPath, 'utf-8');
+    } catch {
+        return; // no settings file — nothing to clean
+    }
+
+    const errors: ParseError[] = [];
+    const parsed: any = parseJsonc(content, errors, { allowTrailingComma: true });
+    if (errors.length > 0 || !parsed || typeof parsed !== 'object') {
+        return; // don't risk corrupting an unparseable file
+    }
+
+    const pre: any[] = Array.isArray(parsed?.hooks?.PreToolUse) ? parsed.hooks.PreToolUse : [];
+    // Find indices of groups whose every inner hook references our script.
+    const ownIndices: number[] = [];
+    for (let i = 0; i < pre.length; i++) {
+        const inner = Array.isArray(pre[i]?.hooks) ? pre[i].hooks : [];
+        if (inner.length > 0 && inner.every((h: any) => typeof h?.command === 'string' && h.command.includes(CLAUDE_HOOK_FILE))) {
+            ownIndices.push(i);
+        }
+    }
+    if (ownIndices.length === 0) {
+        return;
+    }
+
+    // Remove from the highest index down so earlier indices stay valid.
+    for (const idx of ownIndices.reverse()) {
+        const edits = modify(content, ['hooks', 'PreToolUse', idx], undefined, {
+            formattingOptions: { tabSize: 2, insertSpaces: true },
+        });
+        content = applyEdits(content, edits);
+    }
+
+    try {
+        fs.writeFileSync(settingsPath, content, 'utf-8');
+    } catch {
+        // Best-effort — swallow.
+    }
+}
+
 function main(): void {
     for (const p of candidateMcpPaths()) {
         try {
@@ -94,6 +156,11 @@ function main(): void {
         } catch {
             // Never throw — uninstall must always succeed.
         }
+    }
+    try {
+        removeClaudeCodeHook();
+    } catch {
+        // Never throw — uninstall must always succeed.
     }
 }
 
