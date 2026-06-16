@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
-import { parse as parseJsonc, ParseError } from 'jsonc-parser';
+import { parse as parseJsonc, ParseError, applyEdits, modify } from 'jsonc-parser';
 
 let botProcess: ChildProcess | undefined;
 let botStarting: boolean = false;
@@ -189,6 +189,10 @@ export class SetupPanel {
     }
 
     private async _startBot(token: string, chatId: string, port: number, preventSleep: boolean = true) {
+        // Read the configured local-approval delay (source of truth) so it reaches both
+        // the bot process and the MCP server — otherwise the UI setting is never applied.
+        const localApprovalDelay = vscode.workspace.getConfiguration('gatekeeper').get<number>('localApprovalDelay') ?? 10;
+
         // Set starting state
         botStarting = true;
         this._sendStatus();
@@ -241,6 +245,9 @@ export class SetupPanel {
                 TELEGRAM_BOT_TOKEN: token,
                 TELEGRAM_CHAT_ID: chatId,
                 APPROVAL_HTTP_PORT: String(port),
+                // Pass the configured delay through — without this the bot falls back to
+                // its hardcoded 10s default and the UI setting is silently ignored.
+                LOCAL_APPROVAL_DELAY: String(localApprovalDelay),
                 PREVENT_SLEEP: preventSleep ? 'true' : 'false',
             },
             cwd: path.dirname(botScriptPath),
@@ -301,7 +308,11 @@ export class SetupPanel {
             vscode.commands.executeCommand('gatekeeper.refreshStatus');
             
             // Auto-register MCP server
-            await this._registerMcpServer(runtimePython, botScriptPath, port);
+            await this._registerMcpServer(runtimePython, botScriptPath, port, localApprovalDelay);
+
+            // Auto-install the Claude Code PreToolUse hook (no-op if Claude Code
+            // isn't present) so terminal/agent approvals route to the same phone.
+            await this._installClaudeCodeHook(port);
         } else if (botProcess && !botProcess.killed) {
             // Process is running but server not responding
             log('Bot process running but server not responding to health checks');
@@ -369,7 +380,7 @@ export class SetupPanel {
             : 'Bot exited before becoming ready and produced no error output. See GateKeeper logs.';
     }
 
-    private async _registerMcpServer(_pythonPath: string, _botScriptPath: string, port: number) {
+    private async _registerMcpServer(_pythonPath: string, _botScriptPath: string, port: number, localApprovalDelay: number) {
         try {
             const fs = await import('fs');
             const os = await import('os');
@@ -430,13 +441,18 @@ export class SetupPanel {
                 mcpConfig = parsed as typeof mcpConfig;
             }
             
-            // Check if already configured with correct path
+            // Check if already configured with the correct path AND settings. Compare env
+            // too — otherwise a changed localApprovalDelay would never reach the MCP server.
             const existingServer = mcpConfig.servers?.['gatekeeper'];
-            if (existingServer?.args?.[0] === mcpServerPath) {
-                log('MCP server already registered with correct path');
+            const desiredUrl = `http://localhost:${port}`;
+            const desiredDelay = String(localApprovalDelay);
+            if (existingServer?.args?.[0] === mcpServerPath &&
+                existingServer?.env?.GATEKEEPER_URL === desiredUrl &&
+                existingServer?.env?.GATEKEEPER_LOCAL_DELAY === desiredDelay) {
+                log('MCP server already registered with correct path and settings');
                 return;
             }
-            
+
             // Add/update gatekeeper server using Node.js (no Python needed!)
             mcpConfig.servers = mcpConfig.servers || {};
             mcpConfig.servers['gatekeeper'] = {
@@ -444,7 +460,10 @@ export class SetupPanel {
                 command: 'node',
                 args: [mcpServerPath],
                 env: {
-                    GATEKEEPER_URL: `http://localhost:${port}`
+                    GATEKEEPER_URL: desiredUrl,
+                    // The MCP server sends this as a per-request override; without it Copilot
+                    // approvals always use the 10s default regardless of the UI setting.
+                    GATEKEEPER_LOCAL_DELAY: desiredDelay
                 }
             };
             
@@ -475,19 +494,132 @@ export class SetupPanel {
         }
     }
 
+    /**
+     * Install the Claude Code PreToolUse hook so terminal/agent approvals route
+     * to the same GateKeeper server (and phone) as Copilot. No-op when Claude
+     * Code isn't installed (~/.claude missing). The hook is bundled with the
+     * extension; we copy it into ~/.claude/hooks and bake the configured port
+     * into its default URL so no shell-env wiring is needed cross-platform.
+     */
+    private async _installClaudeCodeHook(port: number) {
+        try {
+            const os = await import('os');
+            const claudeDir = path.join(os.homedir(), '.claude');
+
+            // Only relevant for users who actually run Claude Code.
+            if (!fs.existsSync(claudeDir)) {
+                log('Claude Code (~/.claude) not found — skipping hook install');
+                return;
+            }
+
+            const srcHook = path.join(this._extensionUri.fsPath, 'hooks', 'gatekeeper-claude-approval.py');
+            if (!fs.existsSync(srcHook)) {
+                log(`Bundled Claude hook not found at ${srcHook} — skipping`);
+                return;
+            }
+
+            const hooksDir = path.join(claudeDir, 'hooks');
+            if (!fs.existsSync(hooksDir)) {
+                fs.mkdirSync(hooksDir, { recursive: true });
+            }
+            const destHook = path.join(hooksDir, 'gatekeeper-claude-approval.py');
+
+            // Bake the configured port into the default server URL. The env var
+            // GATEKEEPER_URL still overrides it at runtime if the user sets one.
+            let hookSrc = fs.readFileSync(srcHook, 'utf8');
+            hookSrc = hookSrc.replace(
+                /^SERVER = os\.environ\.get\("GATEKEEPER_URL", "http:\/\/localhost:\d+"\)/m,
+                `SERVER = os.environ.get("GATEKEEPER_URL", "http://localhost:${port}")`
+            );
+            fs.writeFileSync(destHook, hookSrc, { mode: 0o755 });
+            log(`Installed Claude Code hook at ${destHook} (port ${port})`);
+
+            await this._registerClaudeHookInSettings(path.join(claudeDir, 'settings.json'), destHook);
+        } catch (error) {
+            // Non-fatal: the Copilot path still works and the README documents
+            // a manual install. Surface to logs only.
+            log(`Failed to install Claude Code hook: ${error}`);
+        }
+    }
+
+    /**
+     * Register (or refresh) the PreToolUse hook entry in ~/.claude/settings.json,
+     * using jsonc-parser surgical edits so the user's existing settings, ordering,
+     * comments, and formatting are preserved (never a full rewrite).
+     */
+    private async _registerClaudeHookInSettings(settingsPath: string, hookPath: string) {
+        const HOOK_FILE = 'gatekeeper-claude-approval.py';
+        const MATCHER = '^(Bash|Edit|MultiEdit|Write|NotebookEdit|WebFetch)$|^mcp__';
+        const command = `python3 "${hookPath}"`;
+        const fmt = { formattingOptions: { tabSize: 2, insertSpaces: true } };
+
+        let content = fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf8') : '{}';
+        const errors: ParseError[] = [];
+        const parsed: any = parseJsonc(content, errors, { allowTrailingComma: true });
+        if (errors.length > 0 || typeof parsed !== 'object' || parsed === null) {
+            log(`Refusing to edit ${settingsPath}: could not safely parse it`);
+            vscode.window.showWarningMessage(
+                `GateKeeper: couldn't parse ${settingsPath}, so the Claude Code hook was not registered. Add it manually (see README → Claude Code Integration).`
+            );
+            return;
+        }
+
+        const pre: any[] = Array.isArray(parsed?.hooks?.PreToolUse) ? parsed.hooks.PreToolUse : [];
+
+        // Idempotent: if an entry already runs our hook file, just refresh its
+        // command (the path or port may have changed) and stop.
+        for (let i = 0; i < pre.length; i++) {
+            const inner = Array.isArray(pre[i]?.hooks) ? pre[i].hooks : [];
+            for (let j = 0; j < inner.length; j++) {
+                if (typeof inner[j]?.command === 'string' && inner[j].command.includes(HOOK_FILE)) {
+                    if (inner[j].command !== command) {
+                        content = applyEdits(content, modify(content, ['hooks', 'PreToolUse', i, 'hooks', j, 'command'], command, fmt));
+                        fs.writeFileSync(settingsPath, content, 'utf8');
+                        log(`Refreshed existing Claude hook command in ${settingsPath}`);
+                    } else {
+                        log('Claude hook already registered with correct command');
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Not present — append a new dedicated PreToolUse group. modify() creates
+        // any missing ancestors (hooks, PreToolUse) for us.
+        const newGroup = {
+            matcher: MATCHER,
+            hooks: [{
+                type: 'command',
+                command,
+                timeout: 320,
+                statusMessage: 'Requesting approval via GateKeeper (Telegram)...',
+            }],
+        };
+        content = applyEdits(content, modify(content, ['hooks', 'PreToolUse', pre.length], newGroup, { ...fmt, isArrayInsertion: true }));
+        fs.writeFileSync(settingsPath, content, 'utf8');
+        log(`Registered PreToolUse hook in ${settingsPath}`);
+        vscode.window.showInformationMessage(
+            '🛡️ GateKeeper installed the Claude Code approval hook. It takes effect in your next Claude Code session.'
+        );
+    }
+
     private async _stopBot() {
         const config = vscode.workspace.getConfiguration('gatekeeper');
         const port = config.get<number>('httpPort') || 8765;
 
-        // Kill our process if we started it
+        // Gracefully stop our tracked child if we still hold a handle. Use SIGINT (not
+        // SIGTERM): bot.py only runs its cleanup `finally` — which stops caffeinate and
+        // the HTTP server — on KeyboardInterrupt. Python's default SIGTERM handler exits
+        // immediately and skips that cleanup.
         if (botProcess && !botProcess.killed) {
-            botProcess.kill();
+            botProcess.kill('SIGINT');
             botProcess = undefined;
-            log('Bot process stopped');
+            log('Bot process stopped (SIGINT)');
         }
 
-        // Also try to kill any process on the port (in case started externally or our
-        // child reference was lost). Branch on platform — lsof/xargs only exist on Unix.
+        // Kill anything still listening on the port. This is the ONLY path that works
+        // when the process was orphaned: a window reload or extension update kills the
+        // extension host and reparents bot.py to PID 1, so botProcess is undefined here.
         try {
             const { execSync } = require('child_process');
             if (process.platform === 'win32') {
@@ -503,14 +635,37 @@ export class SetupPanel {
                 }
                 if (pids.size > 0) log(`Killed PIDs on port ${port}: ${[...pids].join(', ')}`);
             } else {
-                execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore' });
-                log(`Killed any process on port ${port}`);
+                // VS Code launched from the GUI inherits a minimal PATH that omits
+                // /usr/sbin, where lsof lives. Bare `lsof` fails with "command not found"
+                // (silently swallowed before), which is why Stop did nothing. Resolve it
+                // explicitly and pass an augmented PATH.
+                const fs = require('fs');
+                const lsof = fs.existsSync('/usr/sbin/lsof') ? '/usr/sbin/lsof' : 'lsof';
+                const env = { ...process.env, PATH: `/usr/sbin:/usr/bin:/bin:/sbin:${process.env.PATH || ''}` };
+                let pids: number[] = [];
+                try {
+                    const out = execSync(`${lsof} -ti:${port}`, { stdio: ['ignore', 'pipe', 'ignore'], env }).toString();
+                    pids = out.split(/\s+/).filter(Boolean).map((p: string) => parseInt(p, 10)).filter((n: number) => !Number.isNaN(n));
+                } catch {
+                    // lsof exits non-zero when nothing is listening — treat as no PIDs.
+                }
+
+                // SIGINT first so bot.py cleans up caffeinate, then force-kill survivors.
+                for (const pid of pids) { try { process.kill(pid, 'SIGINT'); } catch { /* ignore */ } }
+                if (pids.length > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                    for (const pid of pids) { try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ } }
+                    log(`Stopped PIDs on port ${port}: ${pids.join(', ')}`);
+                } else {
+                    log(`Stop: no process found listening on port ${port}`);
+                }
             }
-        } catch {
-            // Ignore errors — nothing was listening, or we lack permission.
+        } catch (e) {
+            // Surface the failure instead of hiding it — this is what made Stop look broken.
+            log(`Stop: failed to kill process on port ${port}: ${e}`);
         }
 
-        vscode.window.showInformationMessage('Extension stopped');
+        vscode.window.showInformationMessage('GateKeeper server stopped');
 
         // Wait a moment for the process to die
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1398,7 +1553,8 @@ export class SetupPanel {
 
 export function stopBotProcess() {
     if (botProcess && !botProcess.killed) {
-        botProcess.kill();
+        // SIGINT so bot.py runs its cleanup finally (stops caffeinate) — see _stopBot.
+        botProcess.kill('SIGINT');
         botProcess = undefined;
         log('Bot process stopped on deactivation');
     }
@@ -1455,27 +1611,33 @@ export async function ensureMcpRegistration(context: vscode.ExtensionContext) {
             mcpConfig = parsed as typeof mcpConfig;
         }
         
-        // Check if already configured with correct path
+        // Only update if a gatekeeper entry exists (don't auto-create on first install)
         const existingServer = mcpConfig.servers?.['gatekeeper'];
-        if (existingServer?.args?.[0] === mcpServerPath) {
-            return; // Already correct
-        }
-        
-        // Only update if gatekeeper entry exists (don't auto-create on first install)
         if (!existingServer) {
             return;
         }
-        
-        // Update path
+
         const config = vscode.workspace.getConfiguration('gatekeeper');
         const port = config.get<number>('httpPort') || 8765;
-        
+        const localApprovalDelay = config.get<number>('localApprovalDelay') ?? 10;
+        const desiredUrl = `http://localhost:${port}`;
+        const desiredDelay = String(localApprovalDelay);
+
+        // Already correct (path + settings) — nothing to refresh.
+        if (existingServer.args?.[0] === mcpServerPath &&
+            existingServer.env?.GATEKEEPER_URL === desiredUrl &&
+            existingServer.env?.GATEKEEPER_LOCAL_DELAY === desiredDelay) {
+            return;
+        }
+
+        // Refresh path + settings so a changed localApprovalDelay reaches the MCP server.
         mcpConfig.servers['gatekeeper'] = {
             type: 'stdio',
             command: 'node',
             args: [mcpServerPath],
             env: {
-                GATEKEEPER_URL: `http://localhost:${port}`
+                GATEKEEPER_URL: desiredUrl,
+                GATEKEEPER_LOCAL_DELAY: desiredDelay
             }
         };
         

@@ -1,249 +1,90 @@
-# GateKeeper - Remote Command Approval
+# GateKeeper — Remote Command Approval
 
-Approve VS Code Copilot terminal commands from your phone! 📱✅
+Approve VS Code Copilot (and Claude Code) terminal commands from your phone. 📱✅
 
-## Supported Channels
-
-| Channel | Status |
-|---------|--------|
-| 📱 **Telegram** | ✅ Available |
-| 💬 Slack | 🔜 Coming Soon |
-| 💚 WhatsApp | 🔜 Coming Soon |
-| 🎮 Discord | 🔜 Coming Soon |
-| 📧 Email | 🔜 Coming Soon |
-| 📲 SMS (Twilio) | 🔜 Coming Soon |
-| 🔔 Pushover | 🔜 Coming Soon |
-| 📨 Microsoft Teams | 🔜 Coming Soon |
-| 🔗 Webhook (Custom) | 🔜 Coming Soon |
+Telegram is available today; Slack, WhatsApp, Discord, Email, SMS and more are coming soon.
 
 ## Features
 
-- **One-Click Setup**: Enter bot token and chat ID, click Start — that's it!
-- **Local-First Approval**: VS Code notification first, Telegram fallback
-- **Interactive Q&A**: Copilot can ask questions, you answer from VS Code or phone
-- **Race Condition Friendly**: Approve from VS Code OR Telegram — first wins
-- **Mobile Approval**: Approve or reject commands from anywhere
-- **Real-time Notifications**: Get instant alerts when Copilot wants to run a command
-- **Quick Actions**: Approve all or reject all pending commands
-- **Timeout Protection**: Commands auto-reject after 5 minutes of no response
-- **Auto-Approve Patterns**: Define regex patterns for safe commands
-- **Health Monitoring**: Status bar shows connection status and pending count
+- **One-click setup** — paste your bot token + chat ID, click Start.
+- **Local-first approval** — a VS Code notification appears first; it escalates to Telegram only if you don't respond.
+- **Approve from anywhere** — VS Code or phone; first response wins.
+- **Interactive Q&A** — Copilot can ask you questions and get an answer from either channel.
+- **Auto-approve safe commands** — define regex patterns for commands that never need approval.
 
-## Quick Start (2 Minutes)
+## Quick Start (2 minutes)
 
-### 1. Create a Telegram Bot
+**1. Create a Telegram bot** — open [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the bot token.
 
-1. Open [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot` and follow the prompts
-3. Copy your bot token (looks like `123456789:ABCdefGHI...`)
+**2. Get your chat ID** — start a chat with your new bot and send `/start`; copy the Chat ID from the reply.
 
-### 2. Get Your Chat ID
+**3. Configure the extension** — click the **GateKeeper** sidebar icon (or run `GateKeeper: Setup`), paste the token and chat ID, and click **🚀 Start Approval Server**.
 
-1. Start a chat with your new bot
-2. Send `/start`
-3. Copy the Chat ID from the response
-
-### 3. Configure the Extension
-
-1. Click the **GateKeeper** sidebar icon (shield) or run `GateKeeper: Setup`
-2. Paste your bot token and chat ID
-3. Click **🚀 Start Approval Server**
-
-**Done!** The extension will start the approval server automatically.
+That's it — the extension starts the server, registers its Copilot MCP tool, and (if you use Claude Code) installs the approval hook for you. No manual config files to edit.
 
 ## How It Works
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  VS Code        │────▶│  GateKeeper      │────▶│  VS Code    │
-│  Copilot        │     │  Server          │     │  Notification
-│                 │     │                  │     │  (Local)    │
-│                 │     │                  │     └──────┬──────┘
-│                 │     │                  │            │
-│                 │     │                  │     ┌──────▼──────┐
-│                 │◀────│                  │◀────│  Telegram   │
-└─────────────────┘     └──────────────────┘     │  (Fallback) │
-                                                 └─────────────┘
-```
+1. Copilot wants to run a command.
+2. A **VS Code notification** appears immediately with ✅ Approve / ❌ Reject.
+3. If you don't respond within `localApprovalDelay` seconds (default 10), it **escalates to Telegram**.
+4. Either channel can approve — **first response wins**. No response within 5 minutes → auto-reject.
 
-### Local-First Approval Flow
+Copilot can also ask questions (`ask_user`) and get the options as buttons in VS Code or Telegram.
 
-1. Copilot wants to run a command
-2. **VS Code notification appears immediately** with ✅ Approve / ❌ Reject
-3. If no response within `localApprovalDelay` seconds (default: 10s)...
-4. Command **escalates to Telegram**
-5. Either channel can approve — **first response wins**
+## Make Copilot Use GateKeeper
 
-### Ask User Flow (Interactive Q&A)
+By default Copilot uses its built-in terminal tool. To route commands through GateKeeper, tell Copilot to use `mcp_gatekeeper_run_approved_command`:
 
-Copilot can also ask questions and get responses:
+- **Per project** — create `.github/copilot-instructions.md`:
+  ```markdown
+  ## Terminal Commands
+  Always use `mcp_gatekeeper_run_approved_command` for all shell commands.
+  ```
+- **All workspaces** — add to `settings.json`:
+  ```json
+  "github.copilot.chat.codeGeneration.instructions": [
+    { "text": "Always use `mcp_gatekeeper_run_approved_command` for terminal commands instead of `run_in_terminal`." }
+  ]
+  ```
 
-```
-ask_user(
-  question: "Which database should I use?",
-  options: ["PostgreSQL", "MySQL", "SQLite"],
-  context: "Setting up backend"
-)
-```
+The tool **degrades gracefully**: server running → approval flow; server off → runs the command directly. So it's always safe to leave configured.
 
-- **VS Code**: Shows quick-pick with options + custom input
-- **Telegram**: Shows buttons + "✏️ Type custom answer..." option
-- **First response wins**: Answer from either channel
+## Reference
 
-## Extension Commands
+**Extension commands** — `GateKeeper: Setup` (main UI), `Configure`, `Test Connection`, `Run Command with Approval`, `Manage Auto-Approve Patterns`, `Show Logs`.
 
-| Command | Description |
-|---------|-------------|
-| `GateKeeper: Setup` | **Main setup UI** - configure and start the server |
-| `GateKeeper: Configure` | Quick settings menu |
-| `GateKeeper: Test Connection` | Verify server is running |
-| `GateKeeper: Run Command with Approval` | Run a command with manual approval |
-| `GateKeeper: Manage Auto-Approve Patterns` | Add/remove safe patterns |
-| `GateKeeper: Show Logs` | Open debug output |
+**Telegram commands** — `/start`, `/status`, `/approveall`, `/rejectall`.
 
-## Telegram Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Show welcome message and Chat ID |
-| `/status` | List pending approvals |
-| `/approveall` | Approve all pending |
-| `/rejectall` | Reject all pending |
-
-## Settings
+**Key settings**
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `gatekeeper.enabled` | Enable approval routing | `false` |
 | `gatekeeper.serverUrl` | Server HTTP URL | `http://localhost:8765` |
 | `gatekeeper.timeoutSeconds` | Total approval timeout | `300` |
-| `gatekeeper.localApprovalDelay` | Seconds to wait for VS Code approval before Telegram | `10` |
-| `gatekeeper.autoApprovePatterns` | Regex patterns for commands to auto-approve | `[]` |
-
-Example auto-approve safe read-only commands:
+| `gatekeeper.localApprovalDelay` | Seconds to wait for VS Code before Telegram | `10` |
+| `gatekeeper.autoApprovePatterns` | Regex patterns to auto-approve | `[]` |
 
 ```json
-{
-    "gatekeeper.autoApprovePatterns": [
-        "^ls\\b",
-        "^git status\\b",
-        "^pwd$"
-    ]
-}
+"gatekeeper.autoApprovePatterns": ["^ls\\b", "^git status\\b", "^pwd$"]
 ```
 
-## Configure Copilot to Use GateKeeper
-
-By default, Copilot uses its built-in terminal tool. To make Copilot always use GateKeeper for command approval, add custom instructions:
-
-### Option 1: User-Level (All Workspaces)
-
-Add a user instruction file that VS Code applies to every workspace. Enable prompt/instruction files first:
-
-```json
-// settings.json
-"chat.promptFiles": true
-```
-
-Then create a file in your VS Code user profile (macOS path shown; use the equivalent `Code/User/prompts/` folder on Windows/Linux):
-
-`~/Library/Application Support/Code/User/prompts/gatekeeper.instructions.md`
-
-```markdown
----
-applyTo: "**"
----
-
-## Terminal Commands
-
-Always use `mcp_gatekeeper_run_approved_command` for terminal commands instead of `run_in_terminal`.
-This enables approval flow when the GateKeeper server is running, or executes directly when not.
-```
-
-Alternatively, set it in `settings.json`:
-
-```json
-"github.copilot.chat.codeGeneration.instructions": [
-  { "text": "Always use `mcp_gatekeeper_run_approved_command` for terminal commands instead of `run_in_terminal`." }
-]
-```
-
-### Option 2: Workspace-Level (Per Project)
-
-Create `.github/copilot-instructions.md` in your project root:
-
-```markdown
-## Terminal Commands
-
-Always use `mcp_gatekeeper_run_approved_command` for all shell commands.
-```
-
-### Smart Fallback
-
-The `run_approved_command` tool automatically detects server status:
-- **Server running** → Approval flow (VS Code notification → Telegram fallback)
-- **Server not running** → Executes directly (like built-in terminal)
-
-This means you can safely configure Copilot to always use GateKeeper — it gracefully degrades when the server is offline.
-
-## Status Bar
-
-The status bar shows:
-- 🟢 **Running**: Server is active and connected
-- 🟡 **Configured**: Server stopped, click to start
-- ⚪ **Not configured**: Click to set up
-- **(N pending)**: Number of pending approvals
-
-## Advanced: MCP Server Integration
-
-For deeper Copilot integration, you can also use the MCP server. Add to your VS Code settings:
-
-```json
-{
-    "mcp": {
-        "servers": {
-            "gatekeeper": {
-                "type": "stdio",
-                "command": "/path/to/.venv/bin/python",
-                "args": ["/path/to/approval_mcp_server.py"]
-            }
-        }
-    }
-}
-```
-
-This provides the `run_approved_command` tool for Copilot agent mode.
-
-## Security
-
-- HTTP server runs on localhost only
-- Bot only accepts commands from your Chat ID
-- Bot token stored securely in VS Code's secret storage
-- Commands timeout after 5 minutes
+**Status bar** — 🟢 running · 🟡 configured (click to start) · ⚪ not configured · `(N pending)`.
 
 ## Requirements
 
-- **Python 3.10+** installed and on `PATH` ([download here](https://www.python.org/downloads/)) — required by the bundled `mcp` package
-- That's it — the extension bundles the bot and **auto-installs its Python dependencies** (`python-telegram-bot`, `aiohttp`, `mcp`) the first time you click **Start Approval Server**.
+- **Python 3.10+** on your `PATH` ([download](https://www.python.org/downloads/)).
+- The extension bundles the bot and auto-installs its Python dependencies (`python-telegram-bot`, `aiohttp`, `mcp`) the first time you click Start.
+
+## Security
+
+- HTTP server binds to localhost only; the bot accepts commands only from your Chat ID.
+- Bot token is kept in VS Code's secret storage. Commands auto-reject after 5 minutes.
 
 ## Troubleshooting
 
-### Server not starting?
-1. Check `GateKeeper: Show Logs` for errors
-2. Verify Python is installed and **3.10 or newer**: `python3 --version`
-   - Older? Install a newer one: `brew install python@3.12` (macOS) or grab the installer from python.org
-3. Ensure bot dependencies are installed
-
-### Not receiving messages?
-1. Verify your Chat ID is correct
-2. Make sure you started a chat with your bot
-3. Check the bot token is valid
+- **Server won't start?** Open `GateKeeper: Show Logs`; verify `python3 --version` is 3.10+ (`brew install python@3.12` on macOS, or grab it from python.org).
+- **No Telegram messages?** Double-check your Chat ID and token, and that you've sent `/start` to the bot.
 
 ## Links
 
-- [Full Documentation](https://github.com/patelsan/gatekeeper)
-- [Report Issues](https://github.com/patelsan/gatekeeper/issues)
-
-## License
-
-MIT
+[Documentation](https://github.com/patelsan/gatekeeper) · [Report an issue](https://github.com/patelsan/gatekeeper/issues) · MIT License
